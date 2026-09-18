@@ -558,7 +558,7 @@ if [ -f android/app/build.gradle.kts ]; then
   sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*.*/compileSdk = 34/' android/app/build.gradle.kts
   sed -i -E 's/targetSdk[[:space:]]*=[[:space:]]*.*/targetSdk = 34/' android/app/build.gradle.kts
   if ! grep -q 'abiFilters.*arm64-v8a' android/app/build.gradle.kts; then
-    sed -i '/defaultConfig[[:space:]]*{/a\        ndk { abiFilters += listOf("arm64-v8a") }' android/app/build.gradle.kts
+    sed -i '/defaultConfig[[:space:]]*{/a\\        ndk { abiFilters += listOf("arm64-v8a") }' android/app/build.gradle.kts
   fi
 elif [ -f android/app/build.gradle ]; then
   sed -i -E 's/compileSdkVersion[[:space:]]+.*/compileSdkVersion 34/' android/app/build.gradle
@@ -569,7 +569,10 @@ elif [ -f android/app/build.gradle ]; then
 fi
 
 nexus_phase "Resolving Flutter dependencies…"
-flutter pub get
+if ! flutter pub get --offline; then
+  nexus_phase "Some dependencies are not cached; trying online resolution…"
+  flutter pub get
+fi
 
 nexus_phase "Analyzing project…"
 flutter analyze --no-fatal-infos --no-fatal-warnings
