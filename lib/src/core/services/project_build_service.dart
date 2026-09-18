@@ -3,11 +3,13 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../models/chat_message.dart';
+import '../models/nexus_preferences.dart';
 import '../models/nexus_project.dart';
 import '../models/project_integration.dart';
 import '../storage/project_integration_repository.dart';
 import 'github_actions_service.dart';
 import 'github_auth_service.dart';
+import 'hybrid_execution_router.dart';
 import 'local_coding_agent.dart';
 import 'nexus_build_workflow.dart';
 import 'project_git_service.dart';
@@ -19,12 +21,14 @@ class ProjectBuildAutomationResult {
     required this.attempts,
     required this.message,
     this.lastRun,
+    this.resolvedTarget,
   });
 
   final bool succeeded;
   final int attempts;
   final String message;
   final ProjectBuildRun? lastRun;
+  final BuildTarget? resolvedTarget;
 }
 
 class ProjectBuildService {
@@ -38,6 +42,12 @@ class ProjectBuildService {
   final ProjectWorkspaceService _workspace = ProjectWorkspaceService.instance;
   final ProjectIntegrationRepository _integrations =
       ProjectIntegrationRepository();
+  final HybridExecutionRouter _router = HybridExecutionRouter.instance;
+
+  Future<HybridExecutionDecision> previewRoute(String projectId) async {
+    final integration = await _integrations.get(projectId);
+    return _router.resolve(integration: integration);
+  }
 
   Future<void> ensureDefaultWorkflow({
     required String projectId,
@@ -64,9 +74,72 @@ class ProjectBuildService {
     void Function(String status)? onStatus,
   }) async {
     final integration = await _integrations.get(project.id);
+    final decision = await _router.resolve(integration: integration);
+    onStatus?.call(decision.reason);
+
+    if (!decision.available || decision.resolved == null) {
+      return ProjectBuildAutomationResult(
+        succeeded: false,
+        attempts: 0,
+        message:
+            'Project changes remain saved in local Git. ${decision.reason}',
+        resolvedTarget: decision.resolved,
+      );
+    }
+
+    switch (decision.resolved!) {
+      case BuildTarget.github:
+        return _buildWithGitHub(
+          project: project,
+          conversation: conversation,
+          integration: integration,
+          onStatus: onStatus,
+        );
+
+      case BuildTarget.pc:
+        return const ProjectBuildAutomationResult(
+          succeeded: false,
+          attempts: 0,
+          message:
+              'PC local build was selected, but the Nexus Bridge build '
+              'executor is not connected in this version yet.',
+          resolvedTarget: BuildTarget.pc,
+        );
+
+      case BuildTarget.phone:
+        return const ProjectBuildAutomationResult(
+          succeeded: false,
+          attempts: 0,
+          message:
+              'Phone local build was selected, but this Nexus build does not '
+              'bundle a full Flutter/Android compiler toolchain. Local AI, '
+              'files and Git remain available.',
+          resolvedTarget: BuildTarget.phone,
+        );
+
+      case BuildTarget.automatic:
+        throw StateError('Automatic build target must resolve before execution.');
+    }
+  }
+
+  Future<ProjectBuildAutomationResult> _buildWithGitHub({
+    required NexusProject project,
+    required List<ChatMessage> conversation,
+    required ProjectIntegration integration,
+    void Function(String status)? onStatus,
+  }) async {
     if (!integration.githubConfigured) {
       throw StateError(
         'Configure this project GitHub repository, branch and workflow first.',
+      );
+    }
+    if (!integration.githubSyncAllowed) {
+      return const ProjectBuildAutomationResult(
+        succeeded: false,
+        attempts: 0,
+        message:
+            'GitHub build was blocked because this project is set to Local Only.',
+        resolvedTarget: BuildTarget.github,
       );
     }
 
@@ -162,6 +235,7 @@ class ProjectBuildService {
           message:
               'GitHub Actions passed after $cycle build attempt(s).',
           lastRun: lastRun,
+          resolvedTarget: BuildTarget.github,
         );
       }
 
@@ -171,6 +245,7 @@ class ProjectBuildService {
           attempts: cycle,
           message: 'Build failed and Auto Fix is disabled.',
           lastRun: lastRun,
+          resolvedTarget: BuildTarget.github,
         );
       }
 
@@ -184,6 +259,7 @@ class ProjectBuildService {
           message:
               'Auto Fix stopped because the same build failure repeated 3 times.',
           lastRun: lastRun,
+          resolvedTarget: BuildTarget.github,
         );
       }
 
@@ -195,6 +271,7 @@ class ProjectBuildService {
               'Auto Fix reached the configured limit of '
               '${integration.maxFixCycles} build cycles.',
           lastRun: lastRun,
+          resolvedTarget: BuildTarget.github,
         );
       }
 
@@ -242,6 +319,7 @@ class ProjectBuildService {
           message:
               'Build failed and the local model could not produce a concrete file repair.',
           lastRun: lastRun,
+          resolvedTarget: BuildTarget.github,
         );
       }
     }
@@ -251,6 +329,7 @@ class ProjectBuildService {
       attempts: integration.maxFixCycles,
       message: 'Auto Fix stopped at its safety limit.',
       lastRun: lastRun,
+      resolvedTarget: BuildTarget.github,
     );
   }
 
