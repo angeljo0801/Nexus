@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../core/state/nexus_controller.dart';
-import '../features/chat/chat_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/models/models_screen.dart';
 import '../features/projects/projects_screen.dart';
@@ -24,7 +23,6 @@ class _NexusShellState extends State<NexusShell> {
     final screens = <Widget>[
       DashboardScreen(controller: widget.controller),
       const ProjectsScreen(),
-      const ChatScreen(),
       const ModelsScreen(),
       const SettingsScreen(),
     ];
@@ -44,11 +42,6 @@ class _NexusShellState extends State<NexusShell> {
             icon: Icon(Icons.folder_outlined),
             selectedIcon: Icon(Icons.folder),
             label: 'Projects',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
-            label: 'Chat',
           ),
           NavigationDestination(
             icon: Icon(Icons.memory_outlined),
