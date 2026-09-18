@@ -1,27 +1,34 @@
 import 'package:flutter/material.dart';
 
+import '../../core/models/chat_message.dart';
+import '../../core/storage/chat_repository.dart';
+
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  const ChatScreen({
+    super.key,
+    required this.projectId,
+    required this.projectName,
+  });
+
+  final String projectId;
+  final String projectName;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatMessage {
-  const _ChatMessage({required this.text, required this.fromUser});
-
-  final String text;
-  final bool fromUser;
-}
-
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController input = TextEditingController();
-  final List<_ChatMessage> messages = const [
-    _ChatMessage(
-      text: 'Nexus chat is ready. Connect a phone model or Nexus Bridge to enable local inference.',
-      fromUser: false,
-    ),
-  ].toList();
+  final ChatRepository repository = ChatRepository();
+
+  List<ChatMessage> messages = const [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    loadMessages();
+  }
 
   @override
   void dispose() {
@@ -29,24 +36,61 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  void send() {
-    final text = input.text.trim();
-    if (text.isEmpty) return;
-
+  Future<void> loadMessages() async {
+    final result = await repository.listMessages(widget.projectId);
+    if (!mounted) return;
     setState(() {
-      messages.add(_ChatMessage(text: text, fromUser: true));
-      messages.add(
-        const _ChatMessage(
-          text: 'No local model is connected yet. The chat UI is active; inference wiring is the next implementation step.',
-          fromUser: false,
-        ),
-      );
-      input.clear();
+      messages = result;
+      loading = false;
     });
   }
 
-  void clearChat() {
-    setState(messages.clear);
+  Future<void> send() async {
+    final text = input.text.trim();
+    if (text.isEmpty) return;
+
+    input.clear();
+    await repository.addMessage(
+      projectId: widget.projectId,
+      role: 'user',
+      content: text,
+    );
+
+    await repository.addMessage(
+      projectId: widget.projectId,
+      role: 'assistant',
+      content:
+          'Your message was saved to this project. Connect a phone model or Nexus Bridge to enable local AI responses.',
+    );
+
+    await loadMessages();
+  }
+
+  Future<void> clearChat() async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Clear project chat?'),
+            content: const Text(
+              'This removes this conversation history. Project Memory is kept separately.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) return;
+    await repository.clearProjectChat(widget.projectId);
+    await loadMessages();
   }
 
   @override
@@ -59,8 +103,8 @@ class _ChatScreenState extends State<ChatScreen> {
             children: [
               Expanded(
                 child: Text(
-                  'Chat',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  '${widget.projectName} Agent',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
                 ),
@@ -74,34 +118,46 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         Expanded(
-          child: messages.isEmpty
-              ? const Center(
-                  child: Text('This chat is empty.'),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message = messages[index];
-                    return Align(
-                      alignment: message.fromUser
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        constraints: const BoxConstraints(maxWidth: 520),
-                        margin: const EdgeInsets.symmetric(vertical: 5),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: message.fromUser
-                              ? Theme.of(context).colorScheme.primaryContainer
-                              : Theme.of(context).colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(16),
+          child: loading
+              ? const Center(child: CircularProgressIndicator())
+              : messages.isEmpty
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Text(
+                          'Start by describing what you want to build or change in this application.',
+                          textAlign: TextAlign.center,
                         ),
-                        child: Text(message.text),
                       ),
-                    );
-                  },
-                ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: messages.length,
+                      itemBuilder: (context, index) {
+                        final message = messages[index];
+                        return Align(
+                          alignment: message.fromUser
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            constraints: const BoxConstraints(maxWidth: 520),
+                            margin: const EdgeInsets.symmetric(vertical: 5),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: message.fromUser
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .primaryContainer
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(message.content),
+                          ),
+                        );
+                      },
+                    ),
         ),
         SafeArea(
           top: false,
@@ -116,7 +172,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     maxLines: 5,
                     onSubmitted: (_) => send(),
                     decoration: const InputDecoration(
-                      hintText: 'Ask Nexus about your app or code…',
+                      hintText: 'Ask Nexus about this project…',
                       border: OutlineInputBorder(),
                     ),
                   ),
