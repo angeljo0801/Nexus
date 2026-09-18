@@ -78,11 +78,23 @@ class ProjectBuildService {
     onStatus?.call(decision.reason);
 
     if (!decision.available || decision.resolved == null) {
+      await _git.ensureRepository(
+        project.id,
+        branch: integration.githubBranch,
+      );
+      final checkpoint = await _git.commitAll(
+        projectId: project.id,
+        branch: integration.githubBranch,
+        message: 'Nexus local checkpoint',
+      );
+
       return ProjectBuildAutomationResult(
         succeeded: false,
         attempts: 0,
-        message:
-            'Project changes remain saved in local Git. ${decision.reason}',
+        message: checkpoint.created
+            ? 'Local checkpoint ${checkpoint.sha.substring(0, 7)} created. '
+                '${decision.reason}'
+            : 'Project is preserved locally. ${decision.reason}',
         resolvedTarget: decision.resolved,
       );
     }
