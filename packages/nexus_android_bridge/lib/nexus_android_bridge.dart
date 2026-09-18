@@ -1,5 +1,25 @@
 import 'package:flutter/services.dart';
 
+class NexusTermuxStatus {
+  const NexusTermuxStatus({
+    required this.installed,
+    required this.runCommandPermission,
+    this.version,
+  });
+
+  final bool installed;
+  final bool runCommandPermission;
+  final String? version;
+
+  factory NexusTermuxStatus.fromMap(Map<Object?, Object?> map) {
+    return NexusTermuxStatus(
+      installed: map['installed'] == true,
+      runCommandPermission: map['runCommandPermission'] == true,
+      version: map['version'] as String?,
+    );
+  }
+}
+
 class NexusAndroidBridge {
   NexusAndroidBridge._();
 
@@ -19,5 +39,36 @@ class NexusAndroidBridge {
 
   static Future<void> closeSharedModel() async {
     await _channel.invokeMethod<void>('closeSharedModel');
+  }
+
+  static Future<NexusTermuxStatus> termuxStatus() async {
+    final raw = await _channel.invokeMethod<Map<Object?, Object?>>(
+      'termuxStatus',
+    );
+    return NexusTermuxStatus.fromMap(raw ?? const {});
+  }
+
+  static Future<bool> requestTermuxRunCommandPermission() async {
+    return await _channel.invokeMethod<bool>(
+          'requestTermuxRunCommandPermission',
+        ) ??
+        false;
+  }
+
+  static Future<void> openTermux() async {
+    await _channel.invokeMethod<void>('openTermux');
+  }
+
+  static Future<void> runTermuxScript(
+    String script, {
+    String label = 'Nexus Phone Build',
+  }) async {
+    await _channel.invokeMethod<void>(
+      'runTermuxScript',
+      {
+        'script': script,
+        'label': label,
+      },
+    );
   }
 }
