@@ -347,7 +347,11 @@ class PhoneBuildRunner {
               '${DateTime.now().millisecondsSinceEpoch}-app-debug.apk',
             ),
           );
-          await request.pipe(output.openWrite());
+          final sink = output.openWrite();
+          await for (final chunk in request) {
+            sink.add(chunk);
+          }
+          await sink.close();
           artifactPath = output.path;
           request.response.statusCode = HttpStatus.created;
           await request.response.close();
