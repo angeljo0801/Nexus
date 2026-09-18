@@ -2,13 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/chat_message.dart';
 import '../../core/models/nexus_project.dart';
-import '../../core/services/github_auth_service.dart';
 import '../../core/services/local_coding_agent.dart';
 import '../../core/services/local_llama_runtime.dart';
 import '../../core/services/local_model_manager.dart';
 import '../../core/services/project_build_service.dart';
 import '../../core/storage/chat_repository.dart';
-import '../../core/storage/project_integration_repository.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -25,9 +23,6 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController input = TextEditingController();
   final ChatRepository repository = ChatRepository();
-  final ProjectIntegrationRepository integrations =
-      ProjectIntegrationRepository();
-
   List<ChatMessage> messages = const [];
   bool loading = true;
   bool generating = false;
@@ -116,33 +111,18 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       if (changed) {
-        final config = await integrations.get(widget.project.id);
-        final account = config.githubConfigured
-            ? await GitHubAuthService.instance.account()
-            : null;
+        final build = await ProjectBuildService.instance.buildAndAutoFix(
+          project: widget.project,
+          conversation: history,
+          onStatus: (status) {
+            if (!mounted) return;
+            setState(() => workingStatus = status);
+          },
+        );
 
-        if (config.githubConfigured && account != null) {
-          final build = await ProjectBuildService.instance.buildAndAutoFix(
-            project: widget.project,
-            conversation: history,
-            onStatus: (status) {
-              if (!mounted) return;
-              setState(() => workingStatus = status);
-            },
-          );
-
-          reply =
-              '$reply\n\nBuild: ${build.message}'
-              '${build.lastRun?.remoteRunId.isNotEmpty == true ? '\nGitHub Actions run #${build.lastRun!.remoteRunId}.' : ''}';
-        } else if (!config.githubConfigured) {
-          reply =
-              '$reply\n\nThe files were changed locally. '
-              'Configure this project in Git & Builds to enable automatic build and repair.';
-        } else {
-          reply =
-              '$reply\n\nThe files were changed locally. '
-              'Connect GitHub in Settings to enable automatic build and repair.';
-        }
+        reply =
+            '$reply\n\nBuild: ${build.message}'
+            '${build.lastRun?.remoteRunId.isNotEmpty == true ? '\nGitHub Actions run #${build.lastRun!.remoteRunId}.' : ''}';
       }
 
       await repository.addMessage(
@@ -251,7 +231,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(24),
                         child: Text(
-                          'Describe what you want to build or change. Nexus can inspect and edit this project workspace, then build and repair it when GitHub is configured.',
+                          'Describe what you want to build or change. Nexus keeps the project local first, then uses the selected local or GitHub build route when one is available.',
                           textAlign: TextAlign.center,
                         ),
                       ),
