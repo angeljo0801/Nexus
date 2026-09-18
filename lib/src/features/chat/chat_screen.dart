@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/chat_message.dart';
+import '../../core/services/local_coding_agent.dart';
 import '../../core/services/local_llama_runtime.dart';
 import '../../core/services/local_model_manager.dart';
 import '../../core/storage/chat_repository.dart';
@@ -10,10 +11,14 @@ class ChatScreen extends StatefulWidget {
     super.key,
     required this.projectId,
     required this.projectName,
+    required this.projectDescription,
+    required this.framework,
   });
 
   final String projectId;
   final String projectName;
+  final String projectDescription;
+  final String framework;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -61,13 +66,13 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     await loadMessages();
 
-    final active = LocalModelManager.instance.activeModel;
-    if (active == null) {
+    await LocalModelManager.instance.initialize();
+    if (!LocalModelManager.instance.hasActiveModel) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Install and select a Phone Local Model from the Models tab first.',
+            'Install or link a Phone Local Model from the Models tab first.',
           ),
         ),
       );
@@ -78,10 +83,24 @@ class _ChatScreenState extends State<ChatScreen> {
 
     try {
       final history = await repository.listMessages(widget.projectId);
-      final reply = await LocalLlamaRuntime.instance.generateReply(
+      final result = await LocalCodingAgent.instance.run(
+        projectId: widget.projectId,
         projectName: widget.projectName,
+        projectDescription: widget.projectDescription,
+        framework: widget.framework,
         history: history,
       );
+
+      var reply = result.response;
+      if (result.actions.isNotEmpty) {
+        final unique = <String>[];
+        for (final action in result.actions) {
+          if (!unique.contains(action)) unique.add(action);
+        }
+        reply =
+            '$reply\n\nNexus tools used: ${unique.join(', ')}'
+            '${result.snapshotPath == null ? '' : '\nSafety snapshot created before edits.'}';
+      }
 
       await repository.addMessage(
         projectId: widget.projectId,
@@ -92,7 +111,7 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Local model error: $error')),
+        SnackBar(content: Text('Nexus agent error: $error')),
       );
     } finally {
       if (mounted) {
@@ -113,7 +132,7 @@ class _ChatScreenState extends State<ChatScreen> {
           builder: (context) => AlertDialog(
             title: const Text('Clear project chat?'),
             content: const Text(
-              'This removes this conversation history. Project Memory is kept separately.',
+              'This removes this conversation history. Project Memory and project files are kept separately.',
             ),
             actions: [
               TextButton(
@@ -143,11 +162,24 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  '${widget.projectName} Agent',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
+                child: AnimatedBuilder(
+                  animation: LocalModelManager.instance,
+                  builder: (context, _) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${widget.projectName} Agent',
+                        style:
+                            Theme.of(context).textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
                       ),
+                      Text(
+                        LocalModelManager.instance.activeDisplayName,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
                 ),
               ),
               if (generating)
@@ -173,7 +205,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(24),
                         child: Text(
-                          'Start by describing what you want to build or change in this application.',
+                          'Describe what you want to build or change. Nexus can now inspect and edit this project workspace with local tools.',
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -198,7 +230,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                     ),
                                   ),
                                   SizedBox(width: 10),
-                                  Text('Nexus is thinking locally…'),
+                                  Flexible(
+                                    child: Text(
+                                      'Nexus is working locally with project tools…',
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -244,7 +280,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     maxLines: 5,
                     onSubmitted: (_) => send(),
                     decoration: const InputDecoration(
-                      hintText: 'Ask Nexus about this project…',
+                      hintText: 'Ask Nexus to build or change something…',
                       border: OutlineInputBorder(),
                     ),
                   ),
