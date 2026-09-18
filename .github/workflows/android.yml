@@ -34,6 +34,7 @@ jobs:
           if [ ! -d android ]; then
             flutter create --platforms=android --org com.nexus.local .
           fi
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/' android/app/build.gradle.kts
 
       - name: Dependencies
         run: flutter pub get
@@ -45,7 +46,7 @@ jobs:
         run: flutter test
 
       - name: Build debug APK
-        run: flutter build apk --debug
+        run: flutter build apk --debug --target-platform android-arm64
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
