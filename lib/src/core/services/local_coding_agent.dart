@@ -193,10 +193,12 @@ Available tools:
 2. list_files {"path":"."}
 3. read_file {"path":"relative/path"}
 4. search_code {"query":"text"}
-5. create_file {"path":"relative/path","content":"full content"}
-6. write_file {"path":"relative/path","content":"full content"}
-7. replace_text {"path":"relative/path","old_text":"exact text","new_text":"replacement","all":false}
-8. delete_file {"path":"relative/path"}
+5. git_status {}
+6. git_diff {}
+7. create_file {"path":"relative/path","content":"full content"}
+8. write_file {"path":"relative/path","content":"full content"}
+9. replace_text {"path":"relative/path","old_text":"exact text","new_text":"replacement","all":false}
+10. delete_file {"path":"relative/path"}
 
 Rules:
 - All paths must be relative to the Nexus project workspace.
@@ -204,7 +206,7 @@ Rules:
 - Prefer replace_text for focused edits and write_file for complete rewrites/new generated files.
 - Do not delete files unless the user's task clearly requires it.
 - Do not attempt to access paths outside the project.
-- Git, GitHub Actions, terminal execution, compilation, and Nexus Bridge are not connected to this phone-agent loop yet. Do not pretend a build or test ran.
+- Git status/diff are real local tools. Commits, push and GitHub Actions are orchestrated by Nexus outside the model tool loop so credentials never enter the prompt. Do not pretend a build or test ran until Nexus supplies an actual build result.
 - If a task requires unavailable execution, finish the code changes you can safely make and clearly state what still needs verification.
 - When finished, return:
 <final>A concise explanation of what you changed, which files matter, and anything still needing build/test verification.</final>
