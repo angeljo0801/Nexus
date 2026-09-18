@@ -9,8 +9,6 @@ import android.net.Uri;
 import android.os.ParcelFileDescriptor;
 
 import androidx.annotation.NonNull;
-import androidx.core.content.ContextCompat;
-
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
@@ -143,10 +141,7 @@ public final class NexusAndroidBridgePlugin
         }
 
         final boolean permissionGranted =
-                ContextCompat.checkSelfPermission(
-                        context,
-                        TERMUX_RUN_PERMISSION
-                ) == PackageManager.PERMISSION_GRANTED;
+                context.checkSelfPermission(TERMUX_RUN_PERMISSION) == PackageManager.PERMISSION_GRANTED;
 
         status.put("installed", installed);
         status.put("runCommandPermission", permissionGranted);
@@ -157,10 +152,7 @@ public final class NexusAndroidBridgePlugin
     }
 
     private void requestTermuxPermission(MethodChannel.Result result) {
-        if (ContextCompat.checkSelfPermission(
-                context,
-                TERMUX_RUN_PERMISSION
-        ) == PackageManager.PERMISSION_GRANTED) {
+        if (context.checkSelfPermission(TERMUX_RUN_PERMISSION) == PackageManager.PERMISSION_GRANTED) {
             result.success(true);
             return;
         }
