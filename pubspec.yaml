@@ -13,13 +13,18 @@ dependencies:
   android_file_picker: ^1.1.1
   crypto: ^3.0.7
   file_picker: ^12.3.0
+  flutter_secure_storage: ^11.2.0
+  http: ^1.6.0
   llama_flutter_android: ^0.2.6
   nexus_android_bridge:
     path: packages/nexus_android_bridge
+  nexus_git_bridge:
+    path: packages/nexus_git_bridge
   path: ^1.9.1
   path_provider: ^2.1.5
   shared_preferences: ^2.5.3
   sqflite: ^2.4.2
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
