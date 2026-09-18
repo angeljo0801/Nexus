@@ -1,24 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/chat_message.dart';
+import '../../core/models/nexus_project.dart';
+import '../../core/services/github_auth_service.dart';
 import '../../core/services/local_coding_agent.dart';
 import '../../core/services/local_llama_runtime.dart';
 import '../../core/services/local_model_manager.dart';
+import '../../core/services/project_build_service.dart';
 import '../../core/storage/chat_repository.dart';
+import '../../core/storage/project_integration_repository.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
     super.key,
-    required this.projectId,
-    required this.projectName,
-    required this.projectDescription,
-    required this.framework,
+    required this.project,
   });
 
-  final String projectId;
-  final String projectName;
-  final String projectDescription;
-  final String framework;
+  final NexusProject project;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -27,10 +25,13 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController input = TextEditingController();
   final ChatRepository repository = ChatRepository();
+  final ProjectIntegrationRepository integrations =
+      ProjectIntegrationRepository();
 
   List<ChatMessage> messages = const [];
   bool loading = true;
   bool generating = false;
+  String workingStatus = 'Nexus is working locally with project tools…';
 
   @override
   void initState() {
@@ -46,7 +47,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> loadMessages() async {
-    final result = await repository.listMessages(widget.projectId);
+    final result = await repository.listMessages(widget.project.id);
     if (!mounted) return;
     setState(() {
       messages = result;
@@ -60,7 +61,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     input.clear();
     await repository.addMessage(
-      projectId: widget.projectId,
+      projectId: widget.project.id,
       role: 'user',
       content: text,
     );
@@ -79,19 +80,31 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    setState(() => generating = true);
+    setState(() {
+      generating = true;
+      workingStatus = 'Nexus is inspecting and editing the project locally…';
+    });
 
     try {
-      final history = await repository.listMessages(widget.projectId);
+      final history = await repository.listMessages(widget.project.id);
       final result = await LocalCodingAgent.instance.run(
-        projectId: widget.projectId,
-        projectName: widget.projectName,
-        projectDescription: widget.projectDescription,
-        framework: widget.framework,
+        projectId: widget.project.id,
+        projectName: widget.project.name,
+        projectDescription: widget.project.description,
+        framework: widget.project.framework,
         history: history,
       );
 
       var reply = result.response;
+      final changed = result.actions.any(
+        (action) => const {
+          'create_file',
+          'write_file',
+          'replace_text',
+          'delete_file',
+        }.contains(action),
+      );
+
       if (result.actions.isNotEmpty) {
         final unique = <String>[];
         for (final action in result.actions) {
@@ -102,8 +115,38 @@ class _ChatScreenState extends State<ChatScreen> {
             '${result.snapshotPath == null ? '' : '\nSafety snapshot created before edits.'}';
       }
 
+      if (changed) {
+        final config = await integrations.get(widget.project.id);
+        final account = config.githubConfigured
+            ? await GitHubAuthService.instance.account()
+            : null;
+
+        if (config.githubConfigured && account != null) {
+          final build = await ProjectBuildService.instance.buildAndAutoFix(
+            project: widget.project,
+            conversation: history,
+            onStatus: (status) {
+              if (!mounted) return;
+              setState(() => workingStatus = status);
+            },
+          );
+
+          reply =
+              '$reply\n\nBuild: ${build.message}'
+              '${build.lastRun?.remoteRunId.isNotEmpty == true ? '\nGitHub Actions run #${build.lastRun!.remoteRunId}.' : ''}';
+        } else if (!config.githubConfigured) {
+          reply =
+              '$reply\n\nThe files were changed locally. '
+              'Configure this project in Git & Builds to enable automatic build and repair.';
+        } else {
+          reply =
+              '$reply\n\nThe files were changed locally. '
+              'Connect GitHub in Settings to enable automatic build and repair.';
+        }
+      }
+
       await repository.addMessage(
-        projectId: widget.projectId,
+        projectId: widget.project.id,
         role: 'assistant',
         content: reply,
       );
@@ -115,7 +158,10 @@ class _ChatScreenState extends State<ChatScreen> {
       );
     } finally {
       if (mounted) {
-        setState(() => generating = false);
+        setState(() {
+          generating = false;
+          workingStatus = 'Nexus is working locally with project tools…';
+        });
       }
     }
   }
@@ -149,7 +195,7 @@ class _ChatScreenState extends State<ChatScreen> {
         false;
 
     if (!confirmed) return;
-    await repository.clearProjectChat(widget.projectId);
+    await repository.clearProjectChat(widget.project.id);
     await loadMessages();
   }
 
@@ -168,7 +214,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${widget.projectName} Agent',
+                        '${widget.project.name} Agent',
                         style:
                             Theme.of(context).textTheme.titleLarge?.copyWith(
                                   fontWeight: FontWeight.w800,
@@ -205,7 +251,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(24),
                         child: Text(
-                          'Describe what you want to build or change. Nexus can now inspect and edit this project workspace with local tools.',
+                          'Describe what you want to build or change. Nexus can inspect and edit this project workspace, then build and repair it when GitHub is configured.',
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -215,26 +261,22 @@ class _ChatScreenState extends State<ChatScreen> {
                       itemCount: messages.length + (generating ? 1 : 0),
                       itemBuilder: (context, index) {
                         if (generating && index == messages.length) {
-                          return const Align(
+                          return Align(
                             alignment: Alignment.centerLeft,
                             child: Padding(
-                              padding: EdgeInsets.all(12),
+                              padding: const EdgeInsets.all(12),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  SizedBox(
+                                  const SizedBox(
                                     width: 18,
                                     height: 18,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
                                     ),
                                   ),
-                                  SizedBox(width: 10),
-                                  Flexible(
-                                    child: Text(
-                                      'Nexus is working locally with project tools…',
-                                    ),
-                                  ),
+                                  const SizedBox(width: 10),
+                                  Flexible(child: Text(workingStatus)),
                                 ],
                               ),
                             ),
