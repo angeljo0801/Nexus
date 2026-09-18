@@ -28,18 +28,21 @@ class ModelDownloadState {
   final ModelDownloadStatus status;
   final double progress;
   final String? error;
+}
 
-  ModelDownloadState copyWith({
-    ModelDownloadStatus? status,
-    double? progress,
-    String? error,
-  }) {
-    return ModelDownloadState(
-      status: status ?? this.status,
-      progress: progress ?? this.progress,
-      error: error,
-    );
-  }
+class ExternalModelLink {
+  const ExternalModelLink({
+    required this.uri,
+    required this.name,
+  });
+
+  final String uri;
+  final String name;
+}
+
+enum ActivePhoneModelKind {
+  managed,
+  external,
 }
 
 class LocalModelManager extends ChangeNotifier {
@@ -48,15 +51,36 @@ class LocalModelManager extends ChangeNotifier {
   static final LocalModelManager instance = LocalModelManager._();
 
   static const _activeModelKey = 'active_phone_model_id';
+  static const _activeKindKey = 'active_phone_model_kind';
+  static const _externalUriKey = 'external_model_uri';
+  static const _externalNameKey = 'external_model_name';
 
   final Map<String, ModelDownloadState> _states = {};
   bool _initialized = false;
   String? _activeModelId;
+  ActivePhoneModelKind? _activeKind;
+  ExternalModelLink? _externalModel;
   String? _pauseRequestedFor;
 
   String? get activeModelId => _activeModelId;
-  LocalModelDefinition? get activeModel =>
+  LocalModelDefinition? get activeManagedModel =>
       NexusModelCatalog.byId(_activeModelId);
+  ExternalModelLink? get externalModel => _externalModel;
+  ActivePhoneModelKind? get activeKind => _activeKind;
+
+  bool get hasActiveModel {
+    if (_activeKind == ActivePhoneModelKind.external) {
+      return _externalModel != null && _externalModel!.uri.isNotEmpty;
+    }
+    return activeManagedModel != null;
+  }
+
+  String get activeDisplayName {
+    if (_activeKind == ActivePhoneModelKind.external) {
+      return _externalModel?.name ?? 'External GGUF';
+    }
+    return activeManagedModel?.name ?? 'No model selected';
+  }
 
   ModelDownloadState stateFor(LocalModelDefinition model) {
     return _states[model.id] ??
@@ -85,7 +109,23 @@ class LocalModelManager extends ChangeNotifier {
   Future<void> initialize() async {
     if (_initialized) return;
     final preferences = await SharedPreferences.getInstance();
+
     _activeModelId = preferences.getString(_activeModelKey);
+    final rawKind = preferences.getString(_activeKindKey);
+    _activeKind = switch (rawKind) {
+      'external' => ActivePhoneModelKind.external,
+      'managed' => ActivePhoneModelKind.managed,
+      _ => null,
+    };
+
+    final externalUri = preferences.getString(_externalUriKey) ?? '';
+    final externalName = preferences.getString(_externalNameKey) ?? '';
+    if (externalUri.isNotEmpty) {
+      _externalModel = ExternalModelLink(
+        uri: externalUri,
+        name: externalName.isEmpty ? 'External GGUF' : externalName,
+      );
+    }
 
     for (final model in NexusModelCatalog.values) {
       final file = await fileFor(model);
@@ -103,16 +143,39 @@ class LocalModelManager extends ChangeNotifier {
               : ModelDownloadStatus.idle,
           progress: model.approximateBytes == 0
               ? 0
-              : (bytes / model.approximateBytes).clamp(0.0, 0.99).toDouble(),
+              : (bytes / model.approximateBytes)
+                  .clamp(0.0, 0.99)
+                  .toDouble(),
         );
       }
     }
 
-    if (_activeModelId != null) {
+    if (_activeKind == ActivePhoneModelKind.managed &&
+        _activeModelId != null) {
       final active = NexusModelCatalog.byId(_activeModelId);
       if (active == null || !(await (await fileFor(active)).exists())) {
         _activeModelId = null;
+        _activeKind = null;
         await preferences.remove(_activeModelKey);
+        await preferences.remove(_activeKindKey);
+      }
+    }
+
+    if (_activeKind == ActivePhoneModelKind.external &&
+        _externalModel == null) {
+      _activeKind = null;
+      await preferences.remove(_activeKindKey);
+    }
+
+    if (_activeKind == null) {
+      for (final model in NexusModelCatalog.values) {
+        if (await (await fileFor(model)).exists()) {
+          _activeModelId = model.id;
+          _activeKind = ActivePhoneModelKind.managed;
+          await preferences.setString(_activeModelKey, model.id);
+          await preferences.setString(_activeKindKey, 'managed');
+          break;
+        }
       }
     }
 
@@ -130,9 +193,63 @@ class LocalModelManager extends ChangeNotifier {
     if (!(await isInstalled(model))) {
       throw StateError('Model is not installed.');
     }
+
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_activeModelKey, model.id);
+    await preferences.setString(_activeKindKey, 'managed');
     _activeModelId = model.id;
+    _activeKind = ActivePhoneModelKind.managed;
+    notifyListeners();
+  }
+
+  Future<void> linkExternalModel({
+    required String uri,
+    required String name,
+  }) async {
+    await initialize();
+    final cleanUri = uri.trim();
+    if (cleanUri.isEmpty) {
+      throw ArgumentError('External model URI is empty.');
+    }
+
+    final preferences = await SharedPreferences.getInstance();
+    final link = ExternalModelLink(
+      uri: cleanUri,
+      name: name.trim().isEmpty ? 'External GGUF' : name.trim(),
+    );
+
+    await preferences.setString(_externalUriKey, link.uri);
+    await preferences.setString(_externalNameKey, link.name);
+    await preferences.setString(_activeKindKey, 'external');
+
+    _externalModel = link;
+    _activeKind = ActivePhoneModelKind.external;
+    notifyListeners();
+  }
+
+  Future<void> useExternalModel() async {
+    await initialize();
+    if (_externalModel == null) {
+      throw StateError('No external model is linked.');
+    }
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_activeKindKey, 'external');
+    _activeKind = ActivePhoneModelKind.external;
+    notifyListeners();
+  }
+
+  Future<void> unlinkExternalModel() async {
+    await initialize();
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_externalUriKey);
+    await preferences.remove(_externalNameKey);
+
+    if (_activeKind == ActivePhoneModelKind.external) {
+      await preferences.remove(_activeKindKey);
+      _activeKind = null;
+    }
+
+    _externalModel = null;
     notifyListeners();
   }
 
@@ -191,27 +308,31 @@ class LocalModelManager extends ChangeNotifier {
 
       await for (final chunk in response) {
         if (_pauseRequestedFor == model.id) {
-          await sink!.flush();
+          await sink.flush();
           await sink.close();
           sink = null;
           _states[model.id] = ModelDownloadState(
             status: ModelDownloadStatus.paused,
-            progress: total <= 0 ? 0 : (received / total).clamp(0.0, 0.99).toDouble(),
+            progress: total <= 0
+                ? 0
+                : (received / total).clamp(0.0, 0.99).toDouble(),
           );
           notifyListeners();
           return;
         }
 
-        sink!.add(chunk);
+        sink.add(chunk);
         received += chunk.length;
         _states[model.id] = ModelDownloadState(
           status: ModelDownloadStatus.downloading,
-          progress: total <= 0 ? 0 : (received / total).clamp(0.0, 0.99).toDouble(),
+          progress: total <= 0
+              ? 0
+              : (received / total).clamp(0.0, 0.99).toDouble(),
         );
         notifyListeners();
       }
 
-      await sink!.flush();
+      await sink.flush();
       await sink.close();
       sink = null;
 
@@ -237,7 +358,7 @@ class LocalModelManager extends ChangeNotifier {
         progress: 1,
       );
 
-      if (_activeModelId == null) {
+      if (_activeKind == null) {
         await setActive(model);
       } else {
         notifyListeners();
@@ -254,7 +375,9 @@ class LocalModelManager extends ChangeNotifier {
           status: ModelDownloadStatus.paused,
           progress: model.approximateBytes == 0
               ? 0
-              : (bytes / model.approximateBytes).clamp(0.0, 0.99).toDouble(),
+              : (bytes / model.approximateBytes)
+                  .clamp(0.0, 0.99)
+                  .toDouble(),
         );
       } else {
         _states[model.id] = ModelDownloadState(
@@ -280,10 +403,13 @@ class LocalModelManager extends ChangeNotifier {
     if (await file.exists()) await file.delete();
     if (await partial.exists()) await partial.delete();
 
-    if (_activeModelId == model.id) {
+    if (_activeKind == ActivePhoneModelKind.managed &&
+        _activeModelId == model.id) {
       final preferences = await SharedPreferences.getInstance();
       await preferences.remove(_activeModelKey);
+      await preferences.remove(_activeKindKey);
       _activeModelId = null;
+      _activeKind = null;
     }
 
     _states[model.id] =
