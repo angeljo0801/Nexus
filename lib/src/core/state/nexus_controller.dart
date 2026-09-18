@@ -4,7 +4,7 @@ import '../models/nexus_preferences.dart';
 
 class NexusController extends ChangeNotifier {
   AiTarget _aiTarget = AiTarget.pc;
-  BuildTarget _buildTarget = BuildTarget.github;
+  BuildTarget _buildTarget = BuildTarget.automatic;
   AgentMode _agentMode = AgentMode.autonomous;
   SyncMode _syncMode = SyncMode.automatic;
   bool _autoFix = true;
