@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'project_git_service.dart';
 import 'project_workspace_service.dart';
 
 class AgentToolResult {
@@ -18,6 +19,7 @@ class AgentToolExecutor {
   }) : _workspace = workspace ?? ProjectWorkspaceService.instance;
 
   final ProjectWorkspaceService _workspace;
+  final ProjectGitService _git = ProjectGitService.instance;
 
   static const Set<String> mutatingTools = {
     'create_file',
@@ -103,6 +105,30 @@ class AgentToolExecutor {
           final summary = await _workspace.summary(projectId);
           return AgentToolResult(
             text: jsonEncode({'summary': summary}),
+          );
+
+        case 'git_status':
+          final status = await _git.status(projectId);
+          return AgentToolResult(
+            text: jsonEncode({
+              'branch': status.branch,
+              'clean': status.clean,
+              'changed_file_count': status.changedFileCount,
+              'added': status.added,
+              'changed': status.changed,
+              'modified': status.modified,
+              'missing': status.missing,
+              'removed': status.removed,
+              'untracked': status.untracked,
+            }),
+          );
+
+        case 'git_diff':
+          final diff = await _git.diff(projectId);
+          return AgentToolResult(
+            text: jsonEncode({
+              'diff': diff,
+            }),
           );
 
         default:
