@@ -23,6 +23,12 @@ enum SyncMode {
   manual,
 }
 
+enum SyncTarget {
+  localOnly,
+  github,
+  automatic,
+}
+
 extension AiTargetLabel on AiTarget {
   String get label => switch (this) {
         AiTarget.pc => 'PC Local Model',
@@ -53,5 +59,14 @@ extension SyncModeLabel on SyncMode {
         SyncMode.automatic => 'Automatic',
         SyncMode.askBeforeSync => 'Ask Before Sync',
         SyncMode.manual => 'Manual',
+      };
+}
+
+
+extension SyncTargetLabel on SyncTarget {
+  String get label => switch (this) {
+        SyncTarget.localOnly => 'Local Only',
+        SyncTarget.github => 'GitHub',
+        SyncTarget.automatic => 'Automatic',
       };
 }
