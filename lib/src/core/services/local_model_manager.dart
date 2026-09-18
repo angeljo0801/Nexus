@@ -191,8 +191,8 @@ class LocalModelManager extends ChangeNotifier {
 
       await for (final chunk in response) {
         if (_pauseRequestedFor == model.id) {
-          await sink.flush();
-          await sink.close();
+          await sink!.flush();
+          await sink!.close();
           sink = null;
           _states[model.id] = ModelDownloadState(
             status: ModelDownloadStatus.paused,
@@ -202,7 +202,7 @@ class LocalModelManager extends ChangeNotifier {
           return;
         }
 
-        sink.add(chunk);
+        sink!.add(chunk);
         received += chunk.length;
         _states[model.id] = ModelDownloadState(
           status: ModelDownloadStatus.downloading,
@@ -211,8 +211,8 @@ class LocalModelManager extends ChangeNotifier {
         notifyListeners();
       }
 
-      await sink.flush();
-      await sink.close();
+      await sink!.flush();
+      await sink!.close();
       sink = null;
 
       _states[model.id] = const ModelDownloadState(
