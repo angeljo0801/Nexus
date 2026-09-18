@@ -11,6 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   android_file_picker: ^1.1.1
+  archive: ^4.3.0
   crypto: ^3.0.7
   file_picker: ^12.3.0
   flutter_secure_storage: ^11.2.0
