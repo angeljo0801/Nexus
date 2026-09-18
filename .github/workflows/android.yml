@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "lib/**"
+      - "packages/**"
       - "test/**"
       - "pubspec.yaml"
       - "analysis_options.yaml"
@@ -46,7 +47,11 @@ jobs:
         run: flutter test
 
       - name: Build debug APK
-        run: flutter build apk --debug --target-platform android-arm64
+        env:
+          NEXUS_GITHUB_CLIENT_ID: ${{ vars.NEXUS_GITHUB_CLIENT_ID }}
+        run: >-
+          flutter build apk --debug --target-platform android-arm64
+          --dart-define=NEXUS_GITHUB_CLIENT_ID=$NEXUS_GITHUB_CLIENT_ID
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
