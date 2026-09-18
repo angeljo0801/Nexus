@@ -20,6 +20,13 @@ class ProjectWorkspaceService {
     return root;
   }
 
+  Future<void> deleteProjectStorage(String projectId) async {
+    final root = await projectRoot(projectId);
+    if (await root.exists()) {
+      await root.delete(recursive: true);
+    }
+  }
+
   Future<Directory> workspaceDirectory(String projectId) async {
     final root = await projectRoot(projectId);
     final workspace = Directory(p.join(root.path, 'workspace'));
