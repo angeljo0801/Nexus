@@ -1,3 +1,5 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../models/project_integration.dart';
 import 'nexus_database.dart';
 
