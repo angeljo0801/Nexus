@@ -58,7 +58,7 @@ class ProjectIntegration {
       githubWorkflow:
           (map['github_workflow'] as String?) ?? 'nexus-build.yml',
       autoFixEnabled: (map['auto_fix_enabled'] as int? ?? 1) != 0,
-      maxFixCycles: (map['max_fix_cycles'] as int? ?? 3).clamp(1, 10),
+      maxFixCycles: (map['max_fix_cycles'] as int? ?? 3).clamp(1, 10).toInt(),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(
         map['updated_at']! as int,
       ),
