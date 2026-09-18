@@ -15,17 +15,21 @@ class NexusDatabase {
     final root = await getDatabasesPath();
     final db = await openDatabase(
       p.join(root, 'nexus.db'),
-      version: 2,
+      version: 3,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: (database, version) async {
         await _createV1(database);
         await _createV2(database);
+        await _createV3(database);
       },
       onUpgrade: (database, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createV2(database);
+        }
+        if (oldVersion < 3) {
+          await _createV3(database);
         }
       },
     );
@@ -124,5 +128,14 @@ class NexusDatabase {
       CREATE INDEX IF NOT EXISTS idx_build_project_started
       ON build_runs(project_id, started_at DESC)
     ''');
+  }
+
+  Future<void> _createV3(Database database) async {
+    await database.execute(
+      "ALTER TABLE project_integrations ADD COLUMN build_target TEXT NOT NULL DEFAULT 'automatic'",
+    );
+    await database.execute(
+      "ALTER TABLE project_integrations ADD COLUMN sync_target TEXT NOT NULL DEFAULT 'automatic'",
+    );
   }
 }
