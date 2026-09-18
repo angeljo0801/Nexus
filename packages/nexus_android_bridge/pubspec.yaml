@@ -1,0 +1,19 @@
+name: nexus_android_bridge
+description: Android content-URI bridge for Nexus external GGUF models.
+version: 0.1.0
+publish_to: "none"
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.nexus.bridge
+        pluginClass: NexusAndroidBridgePlugin
