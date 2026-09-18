@@ -12,6 +12,7 @@ import 'github_auth_service.dart';
 import 'hybrid_execution_router.dart';
 import 'local_coding_agent.dart';
 import 'nexus_build_workflow.dart';
+import 'phone_build_runner.dart';
 import 'project_git_service.dart';
 import 'project_workspace_service.dart';
 
@@ -40,6 +41,7 @@ class ProjectBuildService {
   final GitHubActionsService _actions = GitHubActionsService();
   final ProjectGitService _git = ProjectGitService.instance;
   final ProjectWorkspaceService _workspace = ProjectWorkspaceService.instance;
+  final PhoneBuildRunner _phoneRunner = PhoneBuildRunner.instance;
   final ProjectIntegrationRepository _integrations =
       ProjectIntegrationRepository();
   final HybridExecutionRouter _router = HybridExecutionRouter.instance;
@@ -119,19 +121,190 @@ class ProjectBuildService {
         );
 
       case BuildTarget.phone:
-        return const ProjectBuildAutomationResult(
-          succeeded: false,
-          attempts: 0,
-          message:
-              'Phone local build was selected, but this Nexus build does not '
-              'bundle a full Flutter/Android compiler toolchain. Local AI, '
-              'files and Git remain available.',
-          resolvedTarget: BuildTarget.phone,
+        return _buildOnPhone(
+          project: project,
+          conversation: conversation,
+          integration: integration,
+          onStatus: onStatus,
         );
 
       case BuildTarget.automatic:
         throw StateError('Automatic build target must resolve before execution.');
     }
+  }
+
+  Future<ProjectBuildAutomationResult> _buildOnPhone({
+    required NexusProject project,
+    required List<ChatMessage> conversation,
+    required ProjectIntegration integration,
+    void Function(String status)? onStatus,
+  }) async {
+    final seenFailures = <String, int>{};
+    ProjectBuildRun? lastRun;
+
+    await _git.ensureRepository(
+      project.id,
+      branch: integration.githubBranch,
+    );
+
+    for (var cycle = 1; cycle <= integration.maxFixCycles; cycle++) {
+      onStatus?.call(
+        cycle == 1
+            ? 'Creating local checkpoint before phone build…'
+            : 'Creating local Auto-Fix checkpoint $cycle…',
+      );
+
+      final commit = await _git.commitAll(
+        projectId: project.id,
+        branch: integration.githubBranch,
+        message: cycle == 1
+            ? 'Nexus phone build'
+            : 'Nexus phone Auto-Fix cycle $cycle',
+      );
+
+      final startedAt = DateTime.now();
+      final result = await _phoneRunner.build(
+        projectId: project.id,
+        onStatus: onStatus,
+      );
+
+      final logExcerpt = _tail(result.log, 24000);
+      final now = DateTime.now();
+      lastRun = ProjectBuildRun(
+        id: 'phone_${now.microsecondsSinceEpoch}',
+        projectId: project.id,
+        provider: 'phone_termux',
+        remoteRunId: '',
+        status: 'completed',
+        conclusion: result.success ? 'success' : 'failure',
+        attempt: cycle,
+        commitSha: commit.sha,
+        summary: result.success && result.artifactPath != null
+            ? '${result.message} APK: ${result.artifactPath}'
+            : result.message,
+        logExcerpt: logExcerpt,
+        startedAt: startedAt,
+        finishedAt: now,
+      );
+      await _integrations.addBuildRun(lastRun);
+
+      if (result.success) {
+        onStatus?.call('Phone-local build passed.');
+        return ProjectBuildAutomationResult(
+          succeeded: true,
+          attempts: cycle,
+          message:
+              'Phone-local Termux build passed after $cycle attempt(s).'
+              '${result.artifactPath == null ? '' : ' APK saved locally.'}',
+          lastRun: lastRun,
+          resolvedTarget: BuildTarget.phone,
+        );
+      }
+
+      if (!integration.autoFixEnabled) {
+        return ProjectBuildAutomationResult(
+          succeeded: false,
+          attempts: cycle,
+          message: '${result.message} Auto Fix is disabled.',
+          lastRun: lastRun,
+          resolvedTarget: BuildTarget.phone,
+        );
+      }
+
+      if (result.log.trim().isEmpty) {
+        return ProjectBuildAutomationResult(
+          succeeded: false,
+          attempts: cycle,
+          message:
+              '${result.message} No compiler log was returned, so Nexus did '
+              'not ask the coding model to guess at a repair.',
+          lastRun: lastRun,
+          resolvedTarget: BuildTarget.phone,
+        );
+      }
+
+      final fingerprint = _failureFingerprint(result.log);
+      final repeats = (seenFailures[fingerprint] ?? 0) + 1;
+      seenFailures[fingerprint] = repeats;
+      if (repeats >= 3) {
+        return ProjectBuildAutomationResult(
+          succeeded: false,
+          attempts: cycle,
+          message:
+              'Phone Auto Fix stopped because the same build failure repeated 3 times.',
+          lastRun: lastRun,
+          resolvedTarget: BuildTarget.phone,
+        );
+      }
+
+      if (cycle >= integration.maxFixCycles) {
+        return ProjectBuildAutomationResult(
+          succeeded: false,
+          attempts: cycle,
+          message:
+              'Phone Auto Fix reached the configured limit of '
+              '${integration.maxFixCycles} build cycles.',
+          lastRun: lastRun,
+          resolvedTarget: BuildTarget.phone,
+        );
+      }
+
+      onStatus?.call(
+        'Phone build failed. Local AI is reading the compiler log…',
+      );
+
+      final repairMessage = ChatMessage(
+        id: 'phone_autofix_${DateTime.now().microsecondsSinceEpoch}',
+        projectId: project.id,
+        role: 'user',
+        content: _phoneRepairPrompt(
+          cycle: cycle,
+          logs: result.log,
+        ),
+        createdAt: DateTime.now(),
+      );
+
+      final repairConversation = <ChatMessage>[
+        ...conversation.takeLast(8),
+        repairMessage,
+      ];
+
+      final repair = await LocalCodingAgent.instance.run(
+        projectId: project.id,
+        projectName: project.name,
+        projectDescription: project.description,
+        framework: project.framework,
+        history: repairConversation,
+      );
+
+      final changed = repair.actions.any(
+        (action) => const {
+          'create_file',
+          'write_file',
+          'replace_text',
+          'delete_file',
+        }.contains(action),
+      );
+
+      if (!changed) {
+        return ProjectBuildAutomationResult(
+          succeeded: false,
+          attempts: cycle,
+          message:
+              'The phone build failed and the local model did not produce a concrete file repair.',
+          lastRun: lastRun,
+          resolvedTarget: BuildTarget.phone,
+        );
+      }
+    }
+
+    return ProjectBuildAutomationResult(
+      succeeded: false,
+      attempts: integration.maxFixCycles,
+      message: 'Phone Auto Fix stopped at its safety limit.',
+      lastRun: lastRun,
+      resolvedTarget: BuildTarget.phone,
+    );
   }
 
   Future<ProjectBuildAutomationResult> _buildWithGitHub({
@@ -343,6 +516,34 @@ class ProjectBuildService {
       lastRun: lastRun,
       resolvedTarget: BuildTarget.github,
     );
+  }
+
+  String _phoneRepairPrompt({
+    required int cycle,
+    required String logs,
+  }) {
+    final excerpt = _tail(logs, 14000);
+    return '''
+NEXUS PHONE AUTO-FIX BUILD FAILURE
+
+This is repair cycle $cycle. A real Flutter build running locally in Termux
+on this Android phone failed.
+
+Inspect the actual project files related to the compiler/test error and make
+the smallest safe code or configuration change needed to repair it.
+
+Do not modify Termux-specific temporary build patches because Nexus applies
+those only inside the temporary build copy. Do not claim success until Nexus
+runs the next real phone build.
+
+PHONE BUILD LOG EXCERPT:
+$excerpt
+''';
+  }
+
+  String _tail(String value, int maxChars) {
+    if (value.length <= maxChars) return value;
+    return value.substring(value.length - maxChars);
   }
 
   String _repairPrompt({
