@@ -6,7 +6,7 @@ import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.Status;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
-import org.eclipse.jgit.lib.Config;
+import org.eclipse.jgit.lib.StoredConfig;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
@@ -127,7 +127,7 @@ public final class NexusGitBridgePlugin
                     .setDirectory(workTree)
                     .setInitialBranch(branch)
                     .call()) {
-                final Config config = git.getRepository().getConfig();
+                final StoredConfig config = git.getRepository().getConfig();
                 config.setBoolean("core", null, "filemode", false);
                 config.save();
             }
@@ -237,7 +237,7 @@ public final class NexusGitBridgePlugin
         final String repoPath = requiredString(call, "repoPath");
         final String remoteUrl = requiredString(call, "remoteUrl");
         try (Git git = openGit(repoPath)) {
-            final Config config = git.getRepository().getConfig();
+            final StoredConfig config = git.getRepository().getConfig();
             config.setString("remote", "origin", "url", remoteUrl);
             config.setString("remote", "origin", "fetch", "+refs/heads/*:refs/remotes/origin/*");
             config.save();
