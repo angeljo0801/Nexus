@@ -6,9 +6,9 @@ Nexus is a local-first AI coding agent for Android. The Android app is the main 
 
 - **Local AI only**: no required ChatGPT, Gemini, Claude, or other hosted AI provider.
 - **AI target**: PC Local Model (default), Phone Local Model, or Automatic.
-- **Build target**: GitHub Actions (recommended when online), PC, Phone, or Automatic.
-- **Recommended profile**: PC AI + GitHub Actions + Autonomous Agent + Auto Fix + Automatic Sync.
-- **Offline**: work from local Git repositories on the PC or phone.
+- **Build target**: Phone, PC, GitHub Actions, or Automatic. Automatic is local-first and only uses GitHub when a local runner is unavailable and GitHub is permitted.
+- **Sync target**: Local Only, GitHub, or Automatic, independent from the build target.
+- **Offline**: phone-local AI, files, Git history, diffs and checkpoints continue without GitHub. Full offline builds use an available local runner such as Nexus Bridge on PC.
 - **Autonomous repair loop**: edit → analyze/test/build → read errors → fix → retry with safety limits.
 - **Three-way sync**: Phone ↔ PC ↔ GitHub using Git history and conflict detection.
 - **Nexus Bridge**: lightweight PC companion for secure pairing, local model inference, Git, terminal, tests, and builds.
@@ -40,8 +40,19 @@ The first local coding-agent tool loop is also implemented:
 - Project deletion removes the project database records, workspace, and snapshots without touching models or other projects.
 - Agent runs are capped at 10 tool steps for this baseline.
 
-GitHub Actions run 29 successfully passed analysis, tests, native Android build, and APK artifact upload for the first local-AI baseline. Newer runs validate the external-model and coding-agent additions.
+The project now also has a hybrid Git/build layer:
+- Embedded JGit provides local repository initialization, status, diff, commit, remote configuration, push, and clone primitives on Android.
+- The coding agent can inspect real Git status and diff without receiving GitHub credentials.
+- Per-project Build On and Sync With settings are persisted independently.
+- Local Only prevents GitHub push even if an account is connected.
+- Automatic prefers local build runners and falls back to GitHub Actions only when allowed and available.
+- If no build runner is available, Nexus keeps working locally and creates a local Git checkpoint after agent edits.
+- GitHub Actions dispatch, build monitoring, failed-job log retrieval, local-AI repair, push, and rebuild retry are implemented.
+- The Auto-Fix loop stops on success, configured retry limit, or after the same failure repeats three times.
+- GitHub Device Flow authorization and encrypted token storage are implemented; a production/test build needs a Nexus GitHub App client ID to enable the Connect button.
 
-Still pending from the larger design: Nexus Bridge implementation, Git/GitHub project operations inside the app, Git-backed diff/commit/sync, actual analyze/test/build execution from the phone-agent loop, automatic repair from real build logs, Project Memory UI/indexing, and the remaining safety/agent features.
+GitHub Actions run 62 successfully validated JGit, llama.cpp, secure storage, Android plugins, tests, APK build, and artifact upload before the hybrid routing migration. The latest hybrid build is validated independently in CI.
+
+Still pending from the larger design: Nexus Bridge execution/pairing, a supported phone-local Flutter/Android compiler toolchain, full pull/merge/conflict synchronization, repository-creation UI/permissions, Project Memory UI/indexing, Tasks UI, and the remaining safety/observability features.
 
 See [docs/NEXUS_V1_SPEC.md](docs/NEXUS_V1_SPEC.md) for the approved product specification and [docs/PC_SETUP.md](docs/PC_SETUP.md) for the planned PC setup flow.
