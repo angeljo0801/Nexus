@@ -1,6 +1,7 @@
 import '../models/nexus_preferences.dart';
 import '../models/project_integration.dart';
 import 'github_auth_service.dart';
+import 'phone_build_runner.dart';
 
 class HybridExecutionDecision {
   const HybridExecutionDecision({
@@ -28,6 +29,7 @@ class HybridExecutionRouter {
   static final HybridExecutionRouter instance = HybridExecutionRouter._();
 
   final GitHubAuthService _github = GitHubAuthService.instance;
+  final PhoneBuildRunner _phoneRunner = PhoneBuildRunner.instance;
 
   Future<HybridExecutionDecision> resolve({
     required ProjectIntegration integration,
@@ -63,10 +65,9 @@ class HybridExecutionRouter {
           );
         }
         return unavailable(
-          'Phone-local AI, files and Git are available, but a full Flutter/'
-          'Android compiler toolchain is not bundled in this Nexus build. '
-          'Choose Automatic, GitHub Actions, or pair Nexus Bridge for a '
-          'fully local PC build.',
+          'The Termux phone runner is not ready yet. Open Phone Runner setup '
+          'in Git & Builds, grant the Termux command permission and install '
+          'or verify Flutter ARM64.',
           resolved: BuildTarget.phone,
         );
 
@@ -160,9 +161,11 @@ class HybridExecutionRouter {
   }
 
   Future<bool> _phoneBuildAvailable() async {
-    // Full Flutter/Android compilation is enabled only when a supported
-    // phone-local toolchain provider is actually installed.
-    return false;
+    try {
+      return (await _phoneRunner.availability()).ready;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<bool> _githubAvailable(ProjectIntegration integration) async {
