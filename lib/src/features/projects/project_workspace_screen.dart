@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/nexus_project.dart';
 import '../chat/chat_screen.dart';
+import 'project_builds_screen.dart';
 import 'project_files_screen.dart';
 
 class ProjectWorkspaceScreen extends StatelessWidget {
@@ -42,12 +43,7 @@ class ProjectWorkspaceScreen extends StatelessWidget {
         ),
         body: TabBarView(
           children: [
-            ChatScreen(
-              projectId: project.id,
-              projectName: project.name,
-              projectDescription: project.description,
-              framework: project.framework,
-            ),
+            ChatScreen(project: project),
             ProjectFilesScreen(projectId: project.id),
             const _ProjectPanel(
               icon: Icons.task_alt,
@@ -61,12 +57,7 @@ class ProjectWorkspaceScreen extends StatelessWidget {
               body:
                   'Architecture, decisions, protected paths, branch rules, build commands and preferences stay attached to this project.',
             ),
-            const _ProjectPanel(
-              icon: Icons.build_outlined,
-              title: 'Build history',
-              body:
-                  'The phone agent now edits real sandboxed project files. Build execution will route through GitHub Actions, the paired PC, or a compatible phone toolchain as those adapters are connected.',
-            ),
+            ProjectBuildsScreen(project: project),
             const _ProjectPanel(
               icon: Icons.sync_alt,
               title: 'Synchronization',
