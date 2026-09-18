@@ -78,10 +78,11 @@ Modes:
 
 Agent tool families:
 - Read/search/create/edit/delete project files. **Implemented on the phone baseline.**
-- Git status/diff/commit/branch/push/pull. **Planned; not yet connected to the phone-agent loop.**
-- Terminal commands within allowed workspaces. **Planned through Nexus Bridge / approved execution adapters.**
-- Analyze/test/build. **Planned; CI builds Nexus itself today, but project-agent build execution is not yet wired.**
-- GitHub operations. **Planned in-app authorization and repository tools.**
+- Git status/diff are available directly to the phone coding agent. Local commit, remote configuration, push and clone primitives are implemented through embedded JGit and orchestrated outside the prompt so credentials never enter the LLM context.
+- Terminal commands within allowed workspaces remain planned through Nexus Bridge / approved execution adapters.
+- GitHub Actions analyze/test/build dispatch, run monitoring and failed-log retrieval are implemented for configured projects.
+- Auto-Fix can feed real failed build logs to the local model, apply file repairs, commit/push and rebuild within safety limits.
+- GitHub in-app Device Flow authorization and encrypted token storage are implemented; builds require a configured Nexus GitHub App client ID.
 - Documentation/web tools when Internet is explicitly available.
 - Project indexing and embeddings.
 
@@ -95,7 +96,7 @@ Target behavior:
 6. Retry.
 7. Stop on success or a safety boundary.
 
-Current phone baseline already performs real sandboxed file inspection/editing with a maximum of 10 tool steps and creates a snapshot before the first mutation. The analyze/test/build/error-repair stages remain pending until GitHub Actions, phone build, and/or Nexus Bridge execution adapters are connected to the agent loop.
+Current phone baseline performs real sandboxed file inspection/editing with a maximum of 10 tool steps and creates a snapshot before the first mutation. GitHub Actions build/error-repair is connected. When no build runner is available, Nexus creates an offline local Git checkpoint rather than requiring GitHub. PC-local build execution remains pending Nexus Bridge; phone-local full Flutter/Android compilation remains unavailable until a supported local toolchain provider exists.
 
 Safety boundaries include configurable maximum repair cycles, repeated-error detection, destructive operations, merge conflicts, resource constraints, and out-of-sandbox access.
 
@@ -103,17 +104,26 @@ Safety boundaries include configurable maximum repair cycles, repeated-error det
 AI target and build target are independent.
 
 ### Build targets
-- **GitHub Actions** — recommended when Internet is available.
-- **PC**.
-- **Phone** where the project/toolchain supports it.
-- **Automatic**.
+- **GitHub Actions** — optional online runner.
+- **PC** — local/offline through Nexus Bridge when paired.
+- **Phone** — only where a supported phone toolchain is actually available.
+- **Automatic** — local-first: prefer PC, then phone, then GitHub when GitHub is permitted and available.
 
-### Recommended online profile
-- AI Model: PC Local Model
-- Build On: GitHub Actions
-- Agent Mode: Autonomous
-- Auto Fix: ON
-- Sync: Automatic
+Build routing and synchronization are independent per project.
+
+### Sync targets
+- **Local Only** — Nexus never pushes this project to GitHub.
+- **GitHub** — remote operations are allowed when explicitly used.
+- **Automatic** — local Git stays primary; GitHub is used only by selected features that require it.
+
+A project may therefore use combinations such as Phone AI + Local Git + GitHub Actions, PC AI + PC Build + GitHub backup, or Phone AI + Local Only with no GitHub connection.
+
+### Default hybrid profile
+- AI Model: selectable Phone / PC / Automatic.
+- Build On: Automatic.
+- Agent Mode: Autonomous.
+- Auto Fix: ON.
+- Sync target: Automatic, with Local Only available per project.
 
 ### Offline profiles
 - PC AI + PC Build.
