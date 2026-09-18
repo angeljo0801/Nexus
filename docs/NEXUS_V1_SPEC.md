@@ -26,7 +26,7 @@ Current managed model mappings:
 - **Nexus Coding Lite** → Qwen2.5-Coder-1.5B-Instruct Q8_0 GGUF (~1.65 GB).
 - **Nexus Coding Pro** → Qwen2.5-Coder-7B-Instruct Q4_K_M GGUF (~4.68 GB).
 
-The model manager currently supports download, progress, pause/resume, SHA-256 verification, active-model selection, deletion, and local storage accounting. Project chat can call the selected phone model locally and persist its response. The external-GGUF no-copy Android SAF adapter remains a separate pending implementation because it requires persistent content-URI/native file-descriptor handling rather than assuming a normal filesystem path always exists.
+The model manager currently supports download, progress, pause/resume, SHA-256 verification, active-model selection, deletion, and local storage accounting. Project chat can call the selected phone model locally and persist its response. External GGUF linking is also implemented: Nexus requests a persistent read-only Android SAF grant, stores the content URI, opens it through a native ParcelFileDescriptor, and exposes /proc/self/fd/<fd> to llama.cpp. This lets Nexus use the original model file without creating another multi-GB copy. Unlinking removes the Nexus reference but preserves the original file.
 
 ### Model management
 - In-app download.
@@ -77,15 +77,16 @@ Modes:
 - Read Only.
 
 Agent tool families:
-- Read/search/create/edit/delete project files.
-- Git status/diff/commit/branch/push/pull.
-- Terminal commands within allowed workspaces.
-- Analyze/test/build.
-- GitHub operations.
+- Read/search/create/edit/delete project files. **Implemented on the phone baseline.**
+- Git status/diff/commit/branch/push/pull. **Planned; not yet connected to the phone-agent loop.**
+- Terminal commands within allowed workspaces. **Planned through Nexus Bridge / approved execution adapters.**
+- Analyze/test/build. **Planned; CI builds Nexus itself today, but project-agent build execution is not yet wired.**
+- GitHub operations. **Planned in-app authorization and repository tools.**
 - Documentation/web tools when Internet is explicitly available.
 - Project indexing and embeddings.
 
 ### Autonomous repair loop
+Target behavior:
 1. Apply requested change.
 2. Analyze/test/build.
 3. Parse errors.
@@ -93,6 +94,8 @@ Agent tool families:
 5. Apply correction.
 6. Retry.
 7. Stop on success or a safety boundary.
+
+Current phone baseline already performs real sandboxed file inspection/editing with a maximum of 10 tool steps and creates a snapshot before the first mutation. The analyze/test/build/error-repair stages remain pending until GitHub Actions, phone build, and/or Nexus Bridge execution adapters are connected to the agent loop.
 
 Safety boundaries include configurable maximum repair cycles, repeated-error detection, destructive operations, merge conflicts, resource constraints, and out-of-sandbox access.
 
