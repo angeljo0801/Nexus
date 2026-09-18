@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../core/models/nexus_preferences.dart';
 import '../../core/models/nexus_project.dart';
 import '../../core/models/project_integration.dart';
-import '../../core/services/github_auth_service.dart';
 import '../../core/services/project_build_service.dart';
 import '../../core/services/project_git_service.dart';
 import '../../core/storage/chat_repository.dart';
@@ -37,8 +37,11 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
   bool gitBusy = false;
   bool autoFix = true;
   int maxCycles = 3;
+  BuildTarget buildTarget = BuildTarget.automatic;
+  SyncTarget syncTarget = SyncTarget.automatic;
   String buildStatus = '';
   String gitSummary = 'Not checked';
+  String routeSummary = 'Resolving…';
 
   @override
   void initState() {
@@ -68,10 +71,13 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
       runs = history;
       autoFix = config.autoFixEnabled;
       maxCycles = config.maxFixCycles;
+      buildTarget = config.buildTarget;
+      syncTarget = config.syncTarget;
       loading = false;
     });
 
     await refreshGit();
+    await refreshRoute();
   }
 
   Future<ProjectIntegration> saveConfig({bool showMessage = true}) async {
@@ -89,6 +95,8 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
       githubWorkflow: workflowController.text.trim().isEmpty
           ? 'nexus-build.yml'
           : workflowController.text.trim(),
+      buildTarget: buildTarget,
+      syncTarget: syncTarget,
       autoFixEnabled: autoFix,
       maxFixCycles: maxCycles,
     );
@@ -97,6 +105,7 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
     if (!mounted) return updated;
 
     setState(() => integration = updated);
+    await refreshRoute();
     if (showMessage) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Project build configuration saved.')),
@@ -120,6 +129,22 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
       setState(() => gitSummary = 'Git error: $error');
     } finally {
       if (mounted) setState(() => gitBusy = false);
+    }
+  }
+
+  Future<void> refreshRoute() async {
+    try {
+      final decision =
+          await ProjectBuildService.instance.previewRoute(widget.project.id);
+      if (!mounted) return;
+      setState(() {
+        routeSummary = decision.available
+            ? '${decision.resolved?.label ?? 'Unknown'} · ${decision.reason}'
+            : decision.reason;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => routeSummary = 'Route error: $error');
     }
   }
 
@@ -176,27 +201,7 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
   Future<void> buildNow() async {
     if (building) return;
 
-    final config = await saveConfig(showMessage: false);
-    if (!config.githubConfigured) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter GitHub repository, branch and workflow first.'),
-        ),
-      );
-      return;
-    }
-
-    final account = await GitHubAuthService.instance.account();
-    if (account == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Connect GitHub from Nexus Settings first.'),
-        ),
-      );
-      return;
-    }
+    await saveConfig(showMessage: false);
 
     setState(() {
       building = true;
@@ -247,9 +252,8 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Nexus commits the local workspace, pushes it to the configured '
-          'GitHub repository, runs GitHub Actions, reads failed logs and can '
-          'repair/retry automatically.',
+          'Nexus is local-first. Choose where builds run independently from '
+          'where the project syncs. GitHub is optional, not a requirement.',
         ),
         const SizedBox(height: 16),
         Card(
@@ -257,6 +261,62 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
+                DropdownButtonFormField<BuildTarget>(
+                  initialValue: buildTarget,
+                  decoration: const InputDecoration(
+                    labelText: 'Build On',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: BuildTarget.values
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(value.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: building
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() => buildTarget = value);
+                          }
+                        },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<SyncTarget>(
+                  initialValue: syncTarget,
+                  decoration: const InputDecoration(
+                    labelText: 'Sync With',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: SyncTarget.values
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(value.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: building
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() => syncTarget = value);
+                          }
+                        },
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'GitHub (optional)',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+                const SizedBox(height: 8),
                 TextField(
                   controller: repoController,
                   enabled: !building,
@@ -334,6 +394,18 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
         ),
         const SizedBox(height: 12),
         Card(
+          child: ListTile(
+            leading: const Icon(Icons.route),
+            title: const Text('Resolved build route'),
+            subtitle: Text(routeSummary),
+            trailing: IconButton(
+              onPressed: refreshRoute,
+              icon: const Icon(Icons.refresh),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
           child: Column(
             children: [
               ListTile(
@@ -370,7 +442,7 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.play_arrow),
-          label: Text(building ? 'Building…' : 'Build on GitHub'),
+          label: Text(building ? 'Building…' : 'Build Now'),
         ),
         if (buildStatus.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -395,7 +467,7 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
               leading: Icon(Icons.history),
               title: Text('No builds yet'),
               subtitle: Text(
-                'The first real GitHub Actions run will appear here.',
+                'Successful or failed real build attempts will appear here.',
               ),
             ),
           )
