@@ -94,19 +94,28 @@ class LocalLlamaRuntime {
       await unload();
       final resolved = await _resolveActiveModel();
 
-      final gpu = await _controller.detectGpu();
       final threads =
           math.max(2, math.min(8, Platform.numberOfProcessors - 1));
+
+      var gpuLayers = 0;
+      try {
+        final gpu = await _controller.detectGpu();
+        if (gpu.vulkanSupported) {
+          gpuLayers = gpu.recommendedGpuLayers;
+        }
+      } catch (_) {
+        gpuLayers = 0;
+      }
 
       try {
         await _controller.loadModel(
           modelPath: resolved.path,
           threads: threads,
           contextSize: 4096,
-          gpuLayers: gpu.vulkanSupported ? gpu.recommendedGpuLayers : 0,
+          gpuLayers: gpuLayers,
         );
       } catch (_) {
-        if (gpu.recommendedGpuLayers <= 0) rethrow;
+        if (gpuLayers <= 0) rethrow;
         try {
           await _controller.dispose();
         } catch (_) {}
