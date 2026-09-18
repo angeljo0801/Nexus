@@ -1,9 +1,13 @@
+import 'nexus_preferences.dart';
+
 class ProjectIntegration {
   const ProjectIntegration({
     required this.projectId,
     this.githubRepo = '',
     this.githubBranch = 'main',
     this.githubWorkflow = 'nexus-build.yml',
+    this.buildTarget = BuildTarget.automatic,
+    this.syncTarget = SyncTarget.automatic,
     this.autoFixEnabled = true,
     this.maxFixCycles = 3,
     required this.updatedAt,
@@ -13,6 +17,8 @@ class ProjectIntegration {
   final String githubRepo;
   final String githubBranch;
   final String githubWorkflow;
+  final BuildTarget buildTarget;
+  final SyncTarget syncTarget;
   final bool autoFixEnabled;
   final int maxFixCycles;
   final DateTime updatedAt;
@@ -22,10 +28,14 @@ class ProjectIntegration {
       githubBranch.trim().isNotEmpty &&
       githubWorkflow.trim().isNotEmpty;
 
+  bool get githubSyncAllowed => syncTarget != SyncTarget.localOnly;
+
   ProjectIntegration copyWith({
     String? githubRepo,
     String? githubBranch,
     String? githubWorkflow,
+    BuildTarget? buildTarget,
+    SyncTarget? syncTarget,
     bool? autoFixEnabled,
     int? maxFixCycles,
   }) {
@@ -34,6 +44,8 @@ class ProjectIntegration {
       githubRepo: githubRepo ?? this.githubRepo,
       githubBranch: githubBranch ?? this.githubBranch,
       githubWorkflow: githubWorkflow ?? this.githubWorkflow,
+      buildTarget: buildTarget ?? this.buildTarget,
+      syncTarget: syncTarget ?? this.syncTarget,
       autoFixEnabled: autoFixEnabled ?? this.autoFixEnabled,
       maxFixCycles: maxFixCycles ?? this.maxFixCycles,
       updatedAt: DateTime.now(),
@@ -45,18 +57,36 @@ class ProjectIntegration {
         'github_repo': githubRepo,
         'github_branch': githubBranch,
         'github_workflow': githubWorkflow,
+        'build_target': buildTarget.name,
+        'sync_target': syncTarget.name,
         'auto_fix_enabled': autoFixEnabled ? 1 : 0,
         'max_fix_cycles': maxFixCycles,
         'updated_at': updatedAt.millisecondsSinceEpoch,
       };
 
   factory ProjectIntegration.fromMap(Map<String, Object?> map) {
+    BuildTarget parseBuildTarget(String? raw) {
+      return BuildTarget.values.firstWhere(
+        (value) => value.name == raw,
+        orElse: () => BuildTarget.automatic,
+      );
+    }
+
+    SyncTarget parseSyncTarget(String? raw) {
+      return SyncTarget.values.firstWhere(
+        (value) => value.name == raw,
+        orElse: () => SyncTarget.automatic,
+      );
+    }
+
     return ProjectIntegration(
       projectId: map['project_id']! as String,
       githubRepo: (map['github_repo'] as String?) ?? '',
       githubBranch: (map['github_branch'] as String?) ?? 'main',
       githubWorkflow:
           (map['github_workflow'] as String?) ?? 'nexus-build.yml',
+      buildTarget: parseBuildTarget(map['build_target'] as String?),
+      syncTarget: parseSyncTarget(map['sync_target'] as String?),
       autoFixEnabled: (map['auto_fix_enabled'] as int? ?? 1) != 0,
       maxFixCycles: (map['max_fix_cycles'] as int? ?? 3).clamp(1, 10).toInt(),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(
