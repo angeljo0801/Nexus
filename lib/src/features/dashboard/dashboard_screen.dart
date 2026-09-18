@@ -32,7 +32,7 @@ class DashboardScreen extends StatelessWidget {
               title: 'Recommended profile',
               icon: Icons.auto_awesome,
               child: const Text(
-                'PC Local Model · GitHub Actions · Autonomous · Auto Fix · Automatic Sync',
+                'Automatic Build · Local-first · Autonomous · Auto Fix · Automatic Sync',
               ),
             ),
             const SizedBox(height: 12),
