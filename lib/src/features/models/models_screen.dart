@@ -1,3 +1,5 @@
+import 'package:android_file_picker/android_file_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/models/local_model_definition.dart';
@@ -13,6 +15,7 @@ class ModelsScreen extends StatefulWidget {
 
 class _ModelsScreenState extends State<ModelsScreen> {
   final LocalModelManager manager = LocalModelManager.instance;
+  bool selectingExternal = false;
 
   @override
   void initState() {
@@ -27,6 +30,92 @@ class _ModelsScreenState extends State<ModelsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('${model.name} is now the phone AI model.')),
     );
+  }
+
+  Future<void> selectExternalModel() async {
+    setState(() => selectingExternal = true);
+    try {
+      final picked = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['gguf'],
+        androidOptions: const FilePickerAndroidOptions(
+          safOptions: AndroidSAFOptions(
+            grant: AndroidSAFGrant.lifetime,
+            accessMode: AndroidSAFAccessMode.readOnly,
+            persistGrant: true,
+          ),
+        ),
+      );
+      if (picked == null) return;
+
+      final uri = picked.uri.toString();
+      if (uri.isEmpty) {
+        throw StateError(
+          'Android did not return a persistent URI for this GGUF.',
+        );
+      }
+
+      await LocalLlamaRuntime.instance.unload();
+      await manager.linkExternalModel(
+        uri: uri,
+        name: picked.name,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'External GGUF linked. Nexus is using the original file without copying it.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not link external model: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => selectingExternal = false);
+    }
+  }
+
+  Future<void> useExternalModel() async {
+    await LocalLlamaRuntime.instance.unload();
+    await manager.useExternalModel();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('External GGUF is now active.')),
+    );
+  }
+
+  Future<void> unlinkExternalModel() async {
+    final link = manager.externalModel;
+    if (link == null) return;
+
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Remove external model from Nexus?'),
+            content: Text(
+              'Nexus will forget "${link.name}". The original GGUF file will stay exactly where it is.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Remove from Nexus'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) return;
+    await LocalLlamaRuntime.instance.unload();
+    await manager.unlinkExternalModel();
   }
 
   Future<void> deleteModel(LocalModelDefinition model) async {
@@ -74,6 +163,10 @@ class _ModelsScreenState extends State<ModelsScreen> {
     return AnimatedBuilder(
       animation: manager,
       builder: (context, _) {
+        final external = manager.externalModel;
+        final externalActive =
+            manager.activeKind == ActivePhoneModelKind.external;
+
         return ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -85,14 +178,16 @@ class _ModelsScreenState extends State<ModelsScreen> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Download a Nexus-managed GGUF model for fully local phone inference, or use the PC model through Nexus Bridge.',
+              'Use a Nexus-managed GGUF or link one already stored on this phone without creating another multi-GB copy.',
             ),
             const SizedBox(height: 20),
             for (final model in NexusModelCatalog.values) ...[
               _ModelCard(
                 model: model,
                 state: manager.stateFor(model),
-                active: manager.activeModelId == model.id,
+                active:
+                    manager.activeKind == ActivePhoneModelKind.managed &&
+                    manager.activeModelId == model.id,
                 statusText: statusText(manager.stateFor(model)),
                 onDownload: () => manager.download(model),
                 onPause: () => manager.pauseDownload(model),
@@ -102,13 +197,73 @@ class _ModelsScreenState extends State<ModelsScreen> {
               const SizedBox(height: 12),
             ],
             Card(
-              child: ListTile(
-                leading: const Icon(Icons.folder_open),
-                title: const Text('Use model from phone storage'),
-                subtitle: const Text(
-                  'Direct SAF linking without duplicating an external GGUF is reserved for the external-model adapter. Nexus-managed downloads already avoid a second copy.',
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          externalActive
+                              ? Icons.folder_shared
+                              : Icons.folder_shared_outlined,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'External GGUF',
+                            style:
+                                Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                          ),
+                        ),
+                        if (externalActive)
+                          const Chip(label: Text('Active')),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      external == null
+                          ? 'Use an existing .gguf from phone storage without copying it into Nexus.'
+                          : 'Linked: ${external.name}',
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Android keeps a persistent read-only SAF permission. The original model can also be used by other apps.',
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FilledButton.icon(
+                          onPressed:
+                              selectingExternal ? null : selectExternalModel,
+                          icon: const Icon(Icons.folder_open),
+                          label: Text(
+                            selectingExternal
+                                ? 'Selecting…'
+                                : external == null
+                                    ? 'Choose .gguf'
+                                    : 'Change .gguf',
+                          ),
+                        ),
+                        if (external != null && !externalActive)
+                          FilledButton.tonal(
+                            onPressed: useExternalModel,
+                            child: const Text('Use'),
+                          ),
+                        if (external != null)
+                          TextButton(
+                            onPressed: unlinkExternalModel,
+                            child: const Text('Remove from Nexus'),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
-                trailing: const Icon(Icons.upcoming_outlined),
               ),
             ),
             const SizedBox(height: 12),
@@ -140,7 +295,11 @@ class _ModelsScreenState extends State<ModelsScreen> {
                         Text(
                           'Nexus models: ${gb < 0.01 ? '0 B' : '${gb.toStringAsFixed(2)} GB'}',
                         ),
-                        const Text('External models: 0 B linked'),
+                        Text(
+                          external == null
+                              ? 'External models: none linked'
+                              : 'External models: linked, 0 B duplicated by Nexus',
+                        ),
                         const Text('Embeddings: 0 B'),
                         const Text('Project cache: calculated separately'),
                       ],
