@@ -18,6 +18,16 @@ Nexus must not require hosted AI providers.
 - **Nexus Coding Pro** — approximately 5 GB class; Chat + Coding + Agent; preferred for more complex work.
 - External compatible GGUF models selectable from Android shared storage without duplicating the file.
 
+### Implemented phone-local baseline
+
+The first Android phone-local inference baseline uses llama.cpp through llama_flutter_android and is ARM64/API 26+.
+
+Current managed model mappings:
+- **Nexus Coding Lite** → Qwen2.5-Coder-1.5B-Instruct Q8_0 GGUF (~1.65 GB).
+- **Nexus Coding Pro** → Qwen2.5-Coder-7B-Instruct Q4_K_M GGUF (~4.68 GB).
+
+The model manager currently supports download, progress, pause/resume, SHA-256 verification, active-model selection, deletion, and local storage accounting. Project chat can call the selected phone model locally and persist its response. The external-GGUF no-copy Android SAF adapter remains a separate pending implementation because it requires persistent content-URI/native file-descriptor handling rather than assuming a normal filesystem path always exists.
+
 ### Model management
 - In-app download.
 - Progress, pause/resume, checksum/verification.
