@@ -1,0 +1,35 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android
+android/.gradle/
+android/local.properties
+**/key.properties
+**/*.jks
+**/*.keystore
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Nexus local data / secrets / models
+.env
+.env.*
+!.env.example
+*.gguf
+*.bin
+models/
+local_models/
+secrets/
+*.db
+*.sqlite
