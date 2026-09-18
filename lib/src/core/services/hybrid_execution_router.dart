@@ -35,8 +35,8 @@ class HybridExecutionRouter {
     final requested = integration.buildTarget;
 
     final githubAvailable = await _githubAvailable(integration);
-    final pcAvailable = false;
-    final phoneBuildAvailable = false;
+    final pcAvailable = await _pcBuildAvailable();
+    final phoneBuildAvailable = await _phoneBuildAvailable();
 
     HybridExecutionDecision unavailable(
       String reason, {
@@ -152,6 +152,17 @@ class HybridExecutionRouter {
                   'an offline PC build.',
         );
     }
+  }
+
+  Future<bool> _pcBuildAvailable() async {
+    // Nexus Bridge will provide this dynamically when paired.
+    return false;
+  }
+
+  Future<bool> _phoneBuildAvailable() async {
+    // Full Flutter/Android compilation is enabled only when a supported
+    // phone-local toolchain provider is actually installed.
+    return false;
   }
 
   Future<bool> _githubAvailable(ProjectIntegration integration) async {
