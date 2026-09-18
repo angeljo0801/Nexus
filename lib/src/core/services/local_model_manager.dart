@@ -103,7 +103,7 @@ class LocalModelManager extends ChangeNotifier {
               : ModelDownloadStatus.idle,
           progress: model.approximateBytes == 0
               ? 0
-              : (bytes / model.approximateBytes).clamp(0, 0.99),
+              : (bytes / model.approximateBytes).clamp(0.0, 0.99).toDouble(),
         );
       }
     }
@@ -196,7 +196,7 @@ class LocalModelManager extends ChangeNotifier {
           sink = null;
           _states[model.id] = ModelDownloadState(
             status: ModelDownloadStatus.paused,
-            progress: total <= 0 ? 0 : (received / total).clamp(0, 0.99),
+            progress: total <= 0 ? 0 : (received / total).clamp(0.0, 0.99).toDouble(),
           );
           notifyListeners();
           return;
@@ -206,7 +206,7 @@ class LocalModelManager extends ChangeNotifier {
         received += chunk.length;
         _states[model.id] = ModelDownloadState(
           status: ModelDownloadStatus.downloading,
-          progress: total <= 0 ? 0 : (received / total).clamp(0, 0.99),
+          progress: total <= 0 ? 0 : (received / total).clamp(0.0, 0.99).toDouble(),
         );
         notifyListeners();
       }
@@ -254,7 +254,7 @@ class LocalModelManager extends ChangeNotifier {
           status: ModelDownloadStatus.paused,
           progress: model.approximateBytes == 0
               ? 0
-              : (bytes / model.approximateBytes).clamp(0, 0.99),
+              : (bytes / model.approximateBytes).clamp(0.0, 0.99).toDouble(),
         );
       } else {
         _states[model.id] = ModelDownloadState(
