@@ -1,0 +1,23 @@
+group 'com.nexus.bridge'
+version '0.1.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.7.3'
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.nexus.bridge'
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 26
+    }
+}
