@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/nexus_project.dart';
 import '../chat/chat_screen.dart';
+import 'project_files_screen.dart';
 
 class ProjectWorkspaceScreen extends StatelessWidget {
   const ProjectWorkspaceScreen({
@@ -14,7 +15,7 @@ class ProjectWorkspaceScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: Scaffold(
         appBar: AppBar(
           title: Column(
@@ -30,7 +31,8 @@ class ProjectWorkspaceScreen extends StatelessWidget {
           bottom: const TabBar(
             isScrollable: true,
             tabs: [
-              Tab(icon: Icon(Icons.chat_bubble_outline), text: 'Agent'),
+              Tab(icon: Icon(Icons.smart_toy_outlined), text: 'Agent'),
+              Tab(icon: Icon(Icons.folder_copy_outlined), text: 'Files'),
               Tab(icon: Icon(Icons.task_alt), text: 'Tasks'),
               Tab(icon: Icon(Icons.psychology_outlined), text: 'Memory'),
               Tab(icon: Icon(Icons.build_outlined), text: 'Builds'),
@@ -43,7 +45,10 @@ class ProjectWorkspaceScreen extends StatelessWidget {
             ChatScreen(
               projectId: project.id,
               projectName: project.name,
+              projectDescription: project.description,
+              framework: project.framework,
             ),
+            ProjectFilesScreen(projectId: project.id),
             const _ProjectPanel(
               icon: Icons.task_alt,
               title: 'Project tasks',
@@ -60,7 +65,7 @@ class ProjectWorkspaceScreen extends StatelessWidget {
               icon: Icons.build_outlined,
               title: 'Build history',
               body:
-                  'Analyze, test and build on GitHub Actions, the paired PC or this phone. Auto Fix can repair failures and retry.',
+                  'The phone agent now edits real sandboxed project files. Build execution will route through GitHub Actions, the paired PC, or a compatible phone toolchain as those adapters are connected.',
             ),
             const _ProjectPanel(
               icon: Icons.sync_alt,
