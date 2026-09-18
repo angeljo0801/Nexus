@@ -1,4 +1,5 @@
 import '../models/nexus_project.dart';
+import '../services/project_workspace_service.dart';
 import 'nexus_database.dart';
 
 class ProjectRepository {
@@ -43,5 +44,6 @@ class ProjectRepository {
       where: 'id = ?',
       whereArgs: [projectId],
     );
+    await ProjectWorkspaceService.instance.deleteProjectStorage(projectId);
   }
 }
