@@ -1,18 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../../core/models/nexus_project.dart';
 import '../chat/chat_screen.dart';
 
 class ProjectWorkspaceScreen extends StatelessWidget {
   const ProjectWorkspaceScreen({
     super.key,
-    required this.name,
-    required this.description,
-    required this.framework,
+    required this.project,
   });
 
-  final String name;
-  final String description;
-  final String framework;
+  final NexusProject project;
 
   @override
   Widget build(BuildContext context) {
@@ -23,9 +20,9 @@ class ProjectWorkspaceScreen extends StatelessWidget {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(name),
+              Text(project.name),
               Text(
-                framework,
+                project.framework,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -43,26 +40,29 @@ class ProjectWorkspaceScreen extends StatelessWidget {
         ),
         body: TabBarView(
           children: [
-            const ChatScreen(),
-            _ProjectPanel(
+            ChatScreen(
+              projectId: project.id,
+              projectName: project.name,
+            ),
+            const _ProjectPanel(
               icon: Icons.task_alt,
               title: 'Project tasks',
               body:
                   'Nexus will break large requests into subtasks and track pending, active, completed and blocked work for this project.',
             ),
-            _ProjectPanel(
+            const _ProjectPanel(
               icon: Icons.psychology_outlined,
               title: 'Project Memory',
               body:
                   'Architecture, decisions, protected paths, branch rules, build commands and preferences stay attached to this project.',
             ),
-            _ProjectPanel(
+            const _ProjectPanel(
               icon: Icons.build_outlined,
               title: 'Build history',
               body:
                   'Analyze, test and build on GitHub Actions, the paired PC or this phone. Auto Fix can repair failures and retry.',
             ),
-            _ProjectPanel(
+            const _ProjectPanel(
               icon: Icons.sync_alt,
               title: 'Synchronization',
               body:
