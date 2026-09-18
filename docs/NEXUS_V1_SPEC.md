@@ -26,13 +26,39 @@ Nexus must not require hosted AI providers.
 - Nexus-managed models: Delete frees the actual model file.
 - External models: Remove from Nexus unlinks only; deleting the device file requires explicit confirmation.
 
-## 3. Chat
-- Built-in chat with the selected local model.
-- Multiple chat threads.
-- Persistent local history.
-- Rename, search, archive, delete individual chats, clear history.
-- Chat History and Project Memory are separate concepts.
-- Deleting a chat must not silently delete project rules/memory.
+## 3. Project-first application creation
+Application development is organized around **Projects**, not a single global coding chat.
+
+A project contains:
+- Its own AI coding conversation/history.
+- Project Memory.
+- Tasks/subtasks.
+- Local Git workspace.
+- Optional GitHub repository.
+- AI target and build target preferences.
+- Build/test history.
+- Sync state across Phone ↔ PC ↔ GitHub.
+- Snapshots and rollback history.
+
+Nexus can:
+- Create a new application project from an idea.
+- Clone an existing GitHub repository into a Nexus project.
+- Open an existing local repository as a Nexus project.
+- Create a GitHub repository for a Nexus project when the user grants the required permission.
+
+### Project chat
+The selected local model talks with the user inside the project and can move from ideation to implementation without changing models:
+1. Discuss the application idea.
+2. Suggest features/architecture.
+3. Turn the plan into tasks.
+4. Create/edit code.
+5. Build/test.
+6. Repair errors.
+7. Explain changes.
+
+Project chat history is persistent and can be renamed, searched, archived or deleted. Chat History and Project Memory remain separate so deleting conversation history does not silently erase project rules or technical decisions.
+
+A separate global assistant can remain optional for general questions, but coding work is project-scoped by default.
 
 ## 4. Coding agent
 Modes:
@@ -205,13 +231,25 @@ After work completes, Nexus summarizes:
 - Tests/builds performed.
 - Remaining warnings.
 
-## 14. Modular architecture
+## 14. Secondary enhancements
+These are approved follow-on improvements and should fit the architecture without blocking the core:
+- Automatic Nexus and Nexus Bridge updates.
+- Backup/export/import for chats, Project Memory, settings and project profiles.
+- Performance profiles: Battery Saver, Balanced, Maximum Performance.
+- Context usage controls and automatic summarization for long conversations/projects.
+- Job queue for multiple requested tasks.
+- Notifications for builds, repairs, sync conflicts and device connection.
+- Visual stable-version/project history on top of Git.
+- Unified diagnostics/log panel.
+- Recovery mode that starts Nexus without loading optional models/modules after a bad configuration.
+
+## 15. Modular architecture
 Integrations and tools are modules so Nexus can expand without rewriting the core. Initial modules include:
 - Local models.
 - Nexus Bridge.
 - Git/GitHub.
 - Build/test.
-- Chat.
+- Project-scoped chat.
 - Project Memory.
 - Indexing/embeddings.
 - Secrets.
