@@ -13,13 +13,25 @@ Nexus is a local-first AI coding agent for Android. The Android app is the main 
 - **Three-way sync**: Phone ↔ PC ↔ GitHub using Git history and conflict detection.
 - **Nexus Bridge**: lightweight PC companion for secure pairing, local model inference, Git, terminal, tests, and builds.
 - **Project Memory**: per-repository architecture, branch, rules, build preferences, decisions, and indexed code knowledge.
-- **Persistent Chat**: multiple threads, search/rename/archive/delete, with chat history separated from Project Memory.
-- **Model Manager**: Nexus Coding Lite (~2 GB), Nexus Coding Pro (~5 GB), external GGUF files, download/delete/storage management.
+- **Persistent project chat**: chat history is stored per project and kept separate from Project Memory.
+- **Model Manager**: Nexus Coding Lite (~2 GB), Nexus Coding Pro (~5 GB), external GGUF roadmap, download/delete/storage management.
 - **Safety**: snapshots, rollback, diff preview, sandbox, encrypted secrets, action history, repair limits, resource monitoring.
 - **GitHub integration**: in-app authorization, repository selection, least-privilege permissions, Actions, PRs, and progressive permission requests including repository creation when enabled.
 
-## Repository status
+## Current implementation status
 
-Construction has started. The first milestone is the Android control app and its architecture. PC-side Nexus Bridge and the local inference/build adapters will follow as independent modules.
+The Android app now has a project-first workspace and persistent local SQLite data for projects and project chat.
+
+Phone-local AI is wired using llama_flutter_android / llama.cpp:
+- **Nexus Coding Lite** maps to Qwen2.5-Coder-1.5B-Instruct Q8_0 GGUF (~1.65 GB).
+- **Nexus Coding Pro** maps to Qwen2.5-Coder-7B-Instruct Q4_K_M GGUF (~4.68 GB).
+- Models can be downloaded in-app, paused/resumed, SHA-256 verified, selected, and deleted.
+- The selected phone model is loaded locally and project chat responses are generated on-device.
+- Generation can be stopped from the chat.
+- Android builds target ARM64 and API 26+ for the native llama.cpp runtime.
+
+GitHub Actions run 29 successfully passed analysis, tests, native Android build, and APK artifact upload for this local-AI baseline.
+
+Still pending from the larger design: Nexus Bridge implementation, Git/GitHub project operations inside the app, autonomous coding tools, sync, external no-copy GGUF SAF adapter, Project Memory UI/indexing, and the remaining safety/agent features.
 
 See [docs/NEXUS_V1_SPEC.md](docs/NEXUS_V1_SPEC.md) for the approved product specification and [docs/PC_SETUP.md](docs/PC_SETUP.md) for the planned PC setup flow.
