@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/chat_message.dart';
+import '../../core/services/local_llama_runtime.dart';
+import '../../core/services/local_model_manager.dart';
 import '../../core/storage/chat_repository.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -23,10 +25,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
   List<ChatMessage> messages = const [];
   bool loading = true;
+  bool generating = false;
 
   @override
   void initState() {
     super.initState();
+    LocalModelManager.instance.initialize();
     loadMessages();
   }
 
@@ -47,7 +51,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> send() async {
     final text = input.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || generating) return;
 
     input.clear();
     await repository.addMessage(
@@ -55,18 +59,55 @@ class _ChatScreenState extends State<ChatScreen> {
       role: 'user',
       content: text,
     );
-
-    await repository.addMessage(
-      projectId: widget.projectId,
-      role: 'assistant',
-      content:
-          'Your message was saved to this project. Connect a phone model or Nexus Bridge to enable local AI responses.',
-    );
-
     await loadMessages();
+
+    final active = LocalModelManager.instance.activeModel;
+    if (active == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Install and select a Phone Local Model from the Models tab first.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => generating = true);
+
+    try {
+      final history = await repository.listMessages(widget.projectId);
+      final reply = await LocalLlamaRuntime.instance.generateReply(
+        projectName: widget.projectName,
+        history: history,
+      );
+
+      await repository.addMessage(
+        projectId: widget.projectId,
+        role: 'assistant',
+        content: reply,
+      );
+      await loadMessages();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Local model error: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => generating = false);
+      }
+    }
+  }
+
+  Future<void> stopGeneration() async {
+    await LocalLlamaRuntime.instance.stop();
   }
 
   Future<void> clearChat() async {
+    if (generating) return;
+
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -109,9 +150,16 @@ class _ChatScreenState extends State<ChatScreen> {
                       ),
                 ),
               ),
+              if (generating)
+                IconButton(
+                  tooltip: 'Stop generation',
+                  onPressed: stopGeneration,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                ),
               IconButton(
                 tooltip: 'Clear chat',
-                onPressed: messages.isEmpty ? null : clearChat,
+                onPressed:
+                    messages.isEmpty || generating ? null : clearChat,
                 icon: const Icon(Icons.delete_outline),
               ),
             ],
@@ -132,8 +180,31 @@ class _ChatScreenState extends State<ChatScreen> {
                     )
                   : ListView.builder(
                       padding: const EdgeInsets.all(16),
-                      itemCount: messages.length,
+                      itemCount: messages.length + (generating ? 1 : 0),
                       itemBuilder: (context, index) {
+                        if (generating && index == messages.length) {
+                          return const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Padding(
+                              padding: EdgeInsets.all(12),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text('Nexus is thinking locally…'),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+
                         final message = messages[index];
                         return Align(
                           alignment: message.fromUser
@@ -168,6 +239,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: input,
+                    enabled: !generating,
                     minLines: 1,
                     maxLines: 5,
                     onSubmitted: (_) => send(),
@@ -179,7 +251,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filled(
-                  onPressed: send,
+                  onPressed: generating ? null : send,
                   icon: const Icon(Icons.arrow_upward),
                 ),
               ],
