@@ -1,69 +1,225 @@
 import 'package:flutter/material.dart';
 
-class ProjectsScreen extends StatelessWidget {
+import 'project_workspace_screen.dart';
+
+class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({super.key});
+
+  @override
+  State<ProjectsScreen> createState() => _ProjectsScreenState();
+}
+
+class _ProjectDraft {
+  const _ProjectDraft({
+    required this.name,
+    required this.description,
+    required this.framework,
+  });
+
+  final String name;
+  final String description;
+  final String framework;
+}
+
+class _ProjectsScreenState extends State<ProjectsScreen> {
+  final List<_ProjectDraft> projects = [];
+
+  Future<void> createProject() async {
+    final name = TextEditingController();
+    final description = TextEditingController();
+    var framework = 'Flutter';
+
+    final created = await showDialog<_ProjectDraft>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('New app project'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: name,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Project name',
+                      hintText: 'My App',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: description,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'What do you want to build?',
+                      hintText: 'Describe the application and its main goal.',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: framework,
+                    decoration: const InputDecoration(
+                      labelText: 'Starting framework',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'Flutter', child: Text('Flutter')),
+                      DropdownMenuItem(
+                        value: 'Android Native',
+                        child: Text('Android Native'),
+                      ),
+                      DropdownMenuItem(value: 'Other', child: Text('Other')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => framework = value);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final projectName = name.text.trim();
+                  if (projectName.isEmpty) return;
+                  Navigator.pop(
+                    context,
+                    _ProjectDraft(
+                      name: projectName,
+                      description: description.text.trim(),
+                      framework: framework,
+                    ),
+                  );
+                },
+                child: const Text('Create Project'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    name.dispose();
+    description.dispose();
+
+    if (created == null || !mounted) return;
+    setState(() => projects.add(created));
+    openProject(created);
+  }
+
+  void openProject(_ProjectDraft project) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProjectWorkspaceScreen(
+          name: project.name,
+          description: project.description,
+          framework: project.framework,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Text(
-          'Projects',
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w800,
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Projects',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
               ),
+            ),
+            FilledButton.icon(
+              onPressed: createProject,
+              icon: const Icon(Icons.add),
+              label: const Text('New'),
+            ),
+          ],
         ),
         const SizedBox(height: 6),
         const Text(
-          'Local Git workspaces with independent Project Memory, build rules and sync state.',
+          'Every application gets its own AI conversation, Project Memory, tasks, builds, Git repository and sync state.',
         ),
         const SizedBox(height: 20),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.add_box_outlined, size: 32),
-                const SizedBox(height: 12),
-                Text(
-                  'Open or clone a project',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+        if (projects.isEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.rocket_launch_outlined, size: 34),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Create your first application',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Start from an idea. Nexus will keep the coding conversation, decisions and development history inside this project.',
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: createProject,
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: const Text('Create App Project'),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ...projects.map(
+            (project) => Card(
+              child: ListTile(
+                leading: const Icon(Icons.apps),
+                title: Text(project.name),
+                subtitle: Text(
+                  project.description.isEmpty
+                      ? project.framework
+                      : '${project.framework} · ${project.description}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Clone from GitHub, open a local repository, or create a new repository after GitHub permissions are granted.',
-                ),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: null,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add project'),
-                ),
-              ],
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => openProject(project),
+              ),
             ),
           ),
-        ),
         const SizedBox(height: 12),
-        const Card(
-          child: ListTile(
-            leading: Icon(Icons.psychology_outlined),
-            title: Text('Project Memory'),
-            subtitle: Text(
-              'Architecture, branch rules, protected paths, build commands and decisions are stored separately from chat history.',
-            ),
-          ),
-        ),
-        const Card(
-          child: ListTile(
-            leading: Icon(Icons.sync_alt),
-            title: Text('Git-backed synchronization'),
-            subtitle: Text(
-              'Phone ↔ PC ↔ GitHub with conflict detection instead of blind overwrites.',
-            ),
+        Card(
+          child: Column(
+            children: [
+              const ListTile(
+                leading: Icon(Icons.cloud_download_outlined),
+                title: Text('Clone from GitHub'),
+                subtitle: Text(
+                  'Bring an existing repository into a Nexus project and attach memory, chat and build settings to it.',
+                ),
+              ),
+              const Divider(height: 1),
+              const ListTile(
+                leading: Icon(Icons.folder_open),
+                title: Text('Open local repository'),
+                subtitle: Text(
+                  'Use a repository already stored on the phone or paired PC.',
+                ),
+              ),
+            ],
           ),
         ),
       ],
