@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/local_model_definition.dart';
+import 'background_work_coordinator.dart';
 
 enum ModelDownloadStatus {
   idle,
@@ -61,6 +62,8 @@ class LocalModelManager extends ChangeNotifier {
   ActivePhoneModelKind? _activeKind;
   ExternalModelLink? _externalModel;
   String? _pauseRequestedFor;
+  final NexusBackgroundWorkCoordinator _background =
+      NexusBackgroundWorkCoordinator.instance;
 
   String? get activeModelId => _activeModelId;
   LocalModelDefinition? get activeManagedModel =>
@@ -273,8 +276,15 @@ class LocalModelManager extends ChangeNotifier {
 
     final client = HttpClient();
     IOSink? sink;
+    String? backgroundTaskId;
+    var lastNotifiedPercent = -1;
 
     try {
+      backgroundTaskId = await _background.begin(
+        title: 'Downloading ${model.name}',
+        status:
+            'Preparing download · ${(stateFor(model).progress * 100).toStringAsFixed(1)}%',
+      );
       final request = await client.getUrl(Uri.parse(model.downloadUrl));
       if (existing > 0) {
         request.headers.set(HttpHeaders.rangeHeader, 'bytes=$existing-');
@@ -323,13 +333,27 @@ class LocalModelManager extends ChangeNotifier {
 
         sink!.add(chunk);
         received += chunk.length;
+        final progress = total <= 0
+            ? 0.0
+            : (received / total).clamp(0.0, 0.99).toDouble();
         _states[model.id] = ModelDownloadState(
           status: ModelDownloadStatus.downloading,
-          progress: total <= 0
-              ? 0
-              : (received / total).clamp(0.0, 0.99).toDouble(),
+          progress: progress,
         );
         notifyListeners();
+
+        final percent = (progress * 100).floor();
+        if (backgroundTaskId != null &&
+            (percent >= lastNotifiedPercent + 1 || percent == 99)) {
+          lastNotifiedPercent = percent;
+          unawaited(
+            _background.update(
+              backgroundTaskId,
+              status:
+                  'Downloading · ${(progress * 100).toStringAsFixed(1)}%',
+            ),
+          );
+        }
       }
 
       await sink!.flush();
@@ -341,6 +365,12 @@ class LocalModelManager extends ChangeNotifier {
         progress: 1,
       );
       notifyListeners();
+      if (backgroundTaskId != null) {
+        await _background.update(
+          backgroundTaskId,
+          status: 'Download complete · verifying SHA-256…',
+        );
+      }
 
       final digest = await sha256.bind(partial.openRead()).first;
       if (digest.toString().toLowerCase() != model.sha256.toLowerCase()) {
@@ -391,6 +421,9 @@ class LocalModelManager extends ChangeNotifier {
       client.close(force: true);
       if (_pauseRequestedFor == model.id) {
         _pauseRequestedFor = null;
+      }
+      if (backgroundTaskId != null) {
+        await _background.end(backgroundTaskId);
       }
     }
   }
