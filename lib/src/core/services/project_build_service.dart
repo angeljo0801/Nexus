@@ -275,6 +275,7 @@ class ProjectBuildService {
         projectDescription: project.description,
         framework: project.framework,
         history: repairConversation,
+        onStatus: onStatus,
       );
 
       final changed = repair.actions.any(
@@ -486,6 +487,7 @@ class ProjectBuildService {
         projectDescription: project.description,
         framework: project.framework,
         history: repairConversation,
+        onStatus: onStatus,
       );
 
       final changed = repair.actions.any(
