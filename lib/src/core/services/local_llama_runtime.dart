@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -30,8 +31,29 @@ class LocalLlamaRuntime {
   String? _loadedModelKey;
   bool _loadedFromExternal = false;
   bool _loading = false;
+  Completer<void>? _generationGate;
 
   bool get isLoading => _loading;
+  bool get isGenerating => _generationGate != null;
+
+  Future<T> _withGenerationLock<T>(Future<T> Function() action) async {
+    while (_generationGate != null) {
+      await _generationGate!.future;
+    }
+
+    final gate = Completer<void>();
+    _generationGate = gate;
+    try {
+      return await action();
+    } finally {
+      if (identical(_generationGate, gate)) {
+        _generationGate = null;
+      }
+      if (!gate.isCompleted) {
+        gate.complete();
+      }
+    }
+  }
 
   Future<_ResolvedModel> _resolveActiveModel() async {
     final manager = LocalModelManager.instance;
@@ -185,41 +207,62 @@ class LocalLlamaRuntime {
     int maxTokens = 1200,
     double temperature = 0.25,
     String? template,
-  }) async {
-    final resolved = await _ensureLoaded();
-    final chosenTemplate = template ?? resolved.template;
+  }) {
+    return _withGenerationLock(() async {
+      final resolved = await _ensureLoaded();
+      final chosenTemplate = template ?? resolved.template;
 
-    await _controller.clearContext();
-    final buffer = StringBuffer();
+      await _controller.clearContext();
+      final buffer = StringBuffer();
 
-    final stream = chosenTemplate == null || chosenTemplate.isEmpty
-        ? _controller.generateChat(
-            messages: messages,
-            maxTokens: maxTokens,
-            temperature: temperature,
-            topP: 0.9,
-            topK: 40,
-            repeatPenalty: 1.08,
-          )
-        : _controller.generateChat(
-            messages: messages,
-            template: chosenTemplate,
-            maxTokens: maxTokens,
-            temperature: temperature,
-            topP: 0.9,
-            topK: 40,
-            repeatPenalty: 1.08,
-          );
+      Stream<String> startStream() {
+        return chosenTemplate == null || chosenTemplate.isEmpty
+            ? _controller.generateChat(
+                messages: messages,
+                maxTokens: maxTokens,
+                temperature: temperature,
+                topP: 0.9,
+                topK: 40,
+                repeatPenalty: 1.08,
+              )
+            : _controller.generateChat(
+                messages: messages,
+                template: chosenTemplate,
+                maxTokens: maxTokens,
+                temperature: temperature,
+                topP: 0.9,
+                topK: 40,
+                repeatPenalty: 1.08,
+              );
+      }
 
-    await for (final token in stream) {
-      buffer.write(token);
-    }
+      Stream<String> stream;
+      try {
+        stream = startStream();
+      } catch (error) {
+        final message = error.toString();
+        if (!message.contains('Already generating')) rethrow;
 
-    final result = buffer.toString().trim();
-    if (result.isEmpty) {
-      throw StateError('The local model returned an empty response.');
-    }
-    return result;
+        // Recover a stale controller generation state left by an interrupted
+        // stream before attempting one clean restart.
+        try {
+          await _controller.stop();
+        } catch (_) {}
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        await _controller.clearContext();
+        stream = startStream();
+      }
+
+      await for (final token in stream) {
+        buffer.write(token);
+      }
+
+      final result = buffer.toString().trim();
+      if (result.isEmpty) {
+        throw StateError('The local model returned an empty response.');
+      }
+      return result;
+    });
   }
 
   Future<void> stop() => _controller.stop();
