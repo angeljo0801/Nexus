@@ -71,4 +71,45 @@ class NexusAndroidBridge {
       },
     );
   }
+
+  static Future<bool> requestTaskNotificationPermission() async {
+    return await _channel.invokeMethod<bool>(
+          'requestTaskNotificationPermission',
+        ) ??
+        false;
+  }
+
+  static Future<void> startBackgroundTask({
+    required String title,
+    required String status,
+    required int startedAtMillis,
+  }) async {
+    await _channel.invokeMethod<void>(
+      'startBackgroundTask',
+      {
+        'title': title,
+        'status': status,
+        'startedAtMillis': startedAtMillis,
+      },
+    );
+  }
+
+  static Future<void> updateBackgroundTask({
+    required String title,
+    required String status,
+    required int startedAtMillis,
+  }) async {
+    await _channel.invokeMethod<void>(
+      'updateBackgroundTask',
+      {
+        'title': title,
+        'status': status,
+        'startedAtMillis': startedAtMillis,
+      },
+    );
+  }
+
+  static Future<void> stopBackgroundTask() async {
+    await _channel.invokeMethod<void>('stopBackgroundTask');
+  }
 }
