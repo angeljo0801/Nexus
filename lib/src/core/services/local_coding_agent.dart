@@ -27,14 +27,16 @@ class LocalCodingAgent {
   final AgentToolExecutor _tools = AgentToolExecutor();
   final ProjectWorkspaceService _workspace = ProjectWorkspaceService.instance;
 
-  static final RegExp _toolPattern = RegExp(
-    r'<tool>\s*(\{.*?\})\s*</tool>',
+  static final RegExp _toolBlockPattern = RegExp(
+    r'''<tool(?:\s+name=["']([^"']+)["'])?\s*>(.*?)</tool>''',
     dotAll: true,
+    caseSensitive: false,
   );
 
   static final RegExp _finalPattern = RegExp(
     r'<final>\s*(.*?)\s*</final>',
     dotAll: true,
+    caseSensitive: false,
   );
 
   Future<CodingAgentResult> run({
@@ -51,6 +53,7 @@ class LocalCodingAgent {
     final actions = <String>[];
     var snapshotCreated = false;
     String? snapshotPath;
+    var protocolFailures = 0;
 
     final recent =
         history.length > 12 ? history.sublist(history.length - 12) : history;
@@ -84,17 +87,47 @@ class LocalCodingAgent {
             ? 'Analyzing the request and project…'
             : 'Thinking about the next project step…',
       );
+
       final output = await LocalLlamaRuntime.instance.generateMessages(
         messages: messages,
-        maxTokens: 1400,
-        temperature: 0.18,
+        maxTokens: 1600,
+        temperature: 0.16,
       );
 
-      final toolMatch = _toolPattern.firstMatch(output);
+      final toolMatch = _toolBlockPattern.firstMatch(output);
       if (toolMatch == null) {
         final finalMatch = _finalPattern.firstMatch(output);
-        final response =
-            (finalMatch?.group(1) ?? output).trim();
+        if (finalMatch != null) {
+          final response = (finalMatch.group(1) ?? '').trim();
+          return CodingAgentResult(
+            response: response.isEmpty
+                ? 'I completed the available project work.'
+                : response,
+            actions: actions,
+            snapshotPath: snapshotPath,
+          );
+        }
+
+        if (_looksLikeProtocolFailure(output) && protocolFailures < 3) {
+          protocolFailures++;
+          messages.add(
+            llama.ChatMessage(role: 'assistant', content: output),
+          );
+          messages.add(
+            llama.ChatMessage(
+              role: 'user',
+              content:
+                  '[NEXUS PROTOCOL RECOVERY] Your previous response was not a '
+                  'valid Nexus tool call. Do not explain the formatting error. '
+                  'Continue the task now using exactly one supported <tool> '
+                  'call. For file creation/writes, use the tagged format with '
+                  'raw <content> instead of JSON.',
+            ),
+          );
+          continue;
+        }
+
+        final response = output.trim();
         return CodingAgentResult(
           response: response.isEmpty
               ? 'I completed the available project work.'
@@ -106,14 +139,10 @@ class LocalCodingAgent {
 
       Map<String, dynamic> request;
       try {
-        final decoded = jsonDecode(toolMatch.group(1)!);
-        if (decoded is! Map) {
-          throw const FormatException('Tool request must be an object.');
-        }
-        request = decoded.map(
-          (key, value) => MapEntry(key.toString(), value),
-        );
+        request = _parseToolRequest(toolMatch);
+        protocolFailures = 0;
       } catch (error) {
+        protocolFailures++;
         messages.add(
           llama.ChatMessage(role: 'assistant', content: output),
         );
@@ -121,10 +150,24 @@ class LocalCodingAgent {
           llama.ChatMessage(
             role: 'user',
             content:
-                '[NEXUS TOOL ERROR] Invalid tool JSON: $error. '
-                'Return exactly one valid <tool>{...}</tool> request or a <final> response.',
+                '[NEXUS TOOL ERROR] The tool call could not be parsed: $error. '
+                'Do not return an apology or a JSON-error message. Retry the '
+                'same intended action using the tagged Nexus tool format. '
+                'For example: <tool name="write_file"><path>lib/main.dart</path>'
+                '<content>RAW FILE CONTENT</content></tool>.',
           ),
         );
+
+        if (protocolFailures >= 4) {
+          return CodingAgentResult(
+            response:
+                'Nexus could not safely decode the local model tool request '
+                'after several automatic retries. No malformed tool request '
+                'was executed.',
+            actions: actions,
+            snapshotPath: snapshotPath,
+          );
+        }
         continue;
       }
 
@@ -177,6 +220,94 @@ class LocalCodingAgent {
     );
   }
 
+  Map<String, dynamic> _parseToolRequest(RegExpMatch match) {
+    final attributeName = match.group(1)?.trim();
+    final body = match.group(2)?.trim() ?? '';
+
+    if (attributeName != null && attributeName.isNotEmpty) {
+      return <String, dynamic>{
+        'name': attributeName,
+        'arguments': _parseTaggedArguments(body),
+      };
+    }
+
+    final normalized = _normalizeJsonCandidate(body);
+    final decoded = jsonDecode(normalized);
+    if (decoded is! Map) {
+      throw const FormatException('Tool request must be a JSON object.');
+    }
+
+    return decoded.map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+  }
+
+  Map<String, dynamic> _parseTaggedArguments(String body) {
+    final arguments = <String, dynamic>{};
+    const keys = <String>[
+      'path',
+      'content',
+      'query',
+      'old_text',
+      'new_text',
+      'all',
+    ];
+
+    for (final key in keys) {
+      final pattern = RegExp(
+        '<$key>\\s*(.*?)\\s*</$key>',
+        dotAll: true,
+        caseSensitive: false,
+      );
+      final match = pattern.firstMatch(body);
+      if (match == null) continue;
+
+      final value = match.group(1) ?? '';
+      if (key == 'all') {
+        arguments[key] = value.trim().toLowerCase() == 'true';
+      } else if (key == 'content' ||
+          key == 'old_text' ||
+          key == 'new_text') {
+        arguments[key] = _unwrapCdata(value);
+      } else {
+        arguments[key] = value.trim();
+      }
+    }
+
+    return arguments;
+  }
+
+  String _unwrapCdata(String value) {
+    final trimmed = value.trim();
+    if (trimmed.startsWith('<![CDATA[') && trimmed.endsWith(']]>')) {
+      return trimmed.substring(9, trimmed.length - 3);
+    }
+    return value;
+  }
+
+  String _normalizeJsonCandidate(String value) {
+    var candidate = value.trim();
+
+    candidate = candidate
+        .replaceAll('“', '"')
+        .replaceAll('”', '"')
+        .replaceAll('‘', "'")
+        .replaceAll('’', "'")
+        .replaceAll(RegExp(r',\s*([}\]])'), r'$1');
+
+    return candidate.trim();
+  }
+
+  bool _looksLikeProtocolFailure(String output) {
+    final lower = output.toLowerCase();
+    return lower.contains('error parsing') ||
+        lower.contains('invalid json') ||
+        lower.contains('json input') ||
+        lower.contains('json format') ||
+        lower.contains('tool error') ||
+        lower.contains('parse the json');
+  }
+
   String _statusForTool(
     String name,
     Map<String, dynamic> arguments,
@@ -185,24 +316,19 @@ class LocalCodingAgent {
     return switch (name) {
       'workspace_summary' => 'Inspecting project structure…',
       'list_files' => 'Listing project files…',
-      'read_file' => path.isEmpty
-          ? 'Reading project file…'
-          : 'Reading $path…',
+      'read_file' =>
+        path.isEmpty ? 'Reading project file…' : 'Reading $path…',
       'search_code' => 'Searching project code…',
       'git_status' => 'Checking local Git status…',
       'git_diff' => 'Reviewing local changes…',
-      'create_file' => path.isEmpty
-          ? 'Creating project file…'
-          : 'Creating $path…',
-      'write_file' => path.isEmpty
-          ? 'Writing project file…'
-          : 'Writing $path…',
-      'replace_text' => path.isEmpty
-          ? 'Editing project file…'
-          : 'Editing $path…',
-      'delete_file' => path.isEmpty
-          ? 'Deleting project file…'
-          : 'Deleting $path…',
+      'create_file' =>
+        path.isEmpty ? 'Creating project file…' : 'Creating $path…',
+      'write_file' =>
+        path.isEmpty ? 'Writing project file…' : 'Writing $path…',
+      'replace_text' =>
+        path.isEmpty ? 'Editing project file…' : 'Editing $path…',
+      'delete_file' =>
+        path.isEmpty ? 'Deleting project file…' : 'Deleting $path…',
       _ => 'Running Nexus project tool…',
     };
   }
@@ -220,11 +346,39 @@ Name: $projectName
 Framework: $framework
 Description: $projectDescription
 
-You have real file tools for this project's sandboxed workspace. Never claim you inspected or changed a file unless you used a tool and received a successful result. Never invent file contents.
+You have real file tools for this project's sandboxed workspace. Never claim
+you inspected or changed a file unless you used a tool and received a
+successful result. Never invent file contents.
 
 TOOL PROTOCOL
-When you need a tool, output exactly one tool call in this form:
-<tool>{"name":"tool_name","arguments":{"key":"value"}}</tool>
+When you need a tool, output exactly one tool call.
+
+PREFERRED FORMAT, especially when source code is involved:
+<tool name="write_file">
+<path>lib/main.dart</path>
+<content>
+RAW FILE CONTENT HERE
+</content>
+</tool>
+
+For focused replacements:
+<tool name="replace_text">
+<path>relative/path</path>
+<old_text>exact old text</old_text>
+<new_text>replacement text</new_text>
+<all>false</all>
+</tool>
+
+Simple tools may also use JSON:
+<tool>{"name":"read_file","arguments":{"path":"lib/main.dart"}}</tool>
+
+IMPORTANT:
+- Never put multiline source code inside JSON for create_file or write_file.
+- Use the tagged format with raw <content> for source files.
+- Do not wrap tool calls in Markdown code fences.
+- Output exactly one tool call with no explanation before or after it.
+- If a tool request formatting attempt fails, retry the intended tool call
+  directly. Never answer the user with a JSON parsing error.
 
 Available tools:
 1. workspace_summary {}
@@ -233,21 +387,27 @@ Available tools:
 4. search_code {"query":"text"}
 5. git_status {}
 6. git_diff {}
-7. create_file {"path":"relative/path","content":"full content"}
-8. write_file {"path":"relative/path","content":"full content"}
-9. replace_text {"path":"relative/path","old_text":"exact text","new_text":"replacement","all":false}
+7. create_file with <path> and <content>
+8. write_file with <path> and <content>
+9. replace_text with <path>, <old_text>, <new_text>, <all>
 10. delete_file {"path":"relative/path"}
 
 Rules:
 - All paths must be relative to the Nexus project workspace.
 - Inspect relevant existing files before editing them.
-- Prefer replace_text for focused edits and write_file for complete rewrites/new generated files.
+- Prefer replace_text for focused edits and write_file for complete
+  rewrites or new generated files.
 - Do not delete files unless the user's task clearly requires it.
 - Do not attempt to access paths outside the project.
-- Git status/diff are real local tools. Commits, push and GitHub Actions are orchestrated by Nexus outside the model tool loop so credentials never enter the prompt. Do not pretend a build or test ran until Nexus supplies an actual build result.
-- If a task requires unavailable execution, finish the code changes you can safely make and clearly state what still needs verification.
+- Git status/diff are real local tools. Commits, push and GitHub Actions are
+  orchestrated by Nexus outside the model tool loop so credentials never
+  enter the prompt.
+- Do not pretend a build or test ran until Nexus supplies an actual result.
+- If a task requires unavailable execution, finish the code changes you can
+  safely make and clearly state what still needs verification.
 - When finished, return:
-<final>A concise explanation of what you changed, which files matter, and anything still needing build/test verification.</final>
+<final>A concise explanation of what you changed, which files matter, and
+anything still needing build/test verification.</final>
 ''';
   }
 }
