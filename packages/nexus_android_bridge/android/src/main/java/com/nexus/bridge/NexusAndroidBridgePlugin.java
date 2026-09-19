@@ -400,6 +400,7 @@ public final class NexusAndroidBridgePlugin
         final String title = call.argument("title");
         final String status = call.argument("status");
         final String elapsed = call.argument("elapsed");
+        final Number startedAtMillis = call.argument("startedAtMillis");
 
         intent.putExtra(
                 NexusTaskForegroundService.EXTRA_TITLE,
@@ -411,7 +412,13 @@ public final class NexusAndroidBridgePlugin
         );
         intent.putExtra(
                 NexusTaskForegroundService.EXTRA_ELAPSED,
-                elapsed == null ? "00:00" : elapsed
+                elapsed == null ? "Active" : elapsed
+        );
+        intent.putExtra(
+                NexusTaskForegroundService.EXTRA_STARTED_AT_MILLIS,
+                startedAtMillis == null
+                        ? System.currentTimeMillis()
+                        : startedAtMillis.longValue()
         );
         return intent;
     }
