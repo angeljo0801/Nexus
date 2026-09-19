@@ -280,11 +280,12 @@ class LocalModelManager extends ChangeNotifier {
     var lastNotifiedPercent = -1;
 
     try {
-      backgroundTaskId = await _background.begin(
+      final activeTaskId = await _background.begin(
         title: 'Downloading ${model.name}',
         status:
             'Preparing download · ${(stateFor(model).progress * 100).toStringAsFixed(1)}%',
       );
+      backgroundTaskId = activeTaskId;
       final request = await client.getUrl(Uri.parse(model.downloadUrl));
       if (existing > 0) {
         request.headers.set(HttpHeaders.rangeHeader, 'bytes=$existing-');
@@ -343,12 +344,11 @@ class LocalModelManager extends ChangeNotifier {
         notifyListeners();
 
         final percent = (progress * 100).floor();
-        if (backgroundTaskId != null &&
-            (percent >= lastNotifiedPercent + 1 || percent == 99)) {
+        if (percent >= lastNotifiedPercent + 1 || percent == 99) {
           lastNotifiedPercent = percent;
           unawaited(
             _background.update(
-              backgroundTaskId,
+              activeTaskId,
               status:
                   'Downloading · ${(progress * 100).toStringAsFixed(1)}%',
             ),
@@ -365,12 +365,10 @@ class LocalModelManager extends ChangeNotifier {
         progress: 1,
       );
       notifyListeners();
-      if (backgroundTaskId != null) {
-        await _background.update(
-          backgroundTaskId,
-          status: 'Download complete · verifying SHA-256…',
-        );
-      }
+      await _background.update(
+        activeTaskId,
+        status: 'Download complete · verifying SHA-256…',
+      );
 
       final digest = await sha256.bind(partial.openRead()).first;
       if (digest.toString().toLowerCase() != model.sha256.toLowerCase()) {
