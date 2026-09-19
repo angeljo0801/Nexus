@@ -84,7 +84,7 @@ class _ChatScreenState extends State<ChatScreen> {
           task.startedAt.millisecondsSinceEpoch;
       setState(() {
         generating = true;
-        _activeBackgroundTaskId = task!.id;
+        _activeBackgroundTaskId = task.id;
         _generationStartedAt = task.startedAt;
         workingStatus = task.status;
         elapsedText = NexusBackgroundWorkCoordinator.formatElapsed(
