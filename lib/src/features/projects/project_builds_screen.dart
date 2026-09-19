@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/models/nexus_preferences.dart';
 import '../../core/models/nexus_project.dart';
 import '../../core/models/project_integration.dart';
+import '../../core/services/background_work_coordinator.dart';
 import '../../core/services/phone_build_runner.dart';
 import '../../core/services/project_build_service.dart';
 import '../../core/services/project_git_service.dart';
@@ -28,6 +29,8 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
   final ProjectGitService git = ProjectGitService.instance;
   final ChatRepository chats = ChatRepository();
   final PhoneBuildRunner phoneRunner = PhoneBuildRunner.instance;
+  final NexusBackgroundWorkCoordinator background =
+      NexusBackgroundWorkCoordinator.instance;
 
   final repoController = TextEditingController();
   final branchController = TextEditingController();
@@ -242,21 +245,34 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
       phoneRunnerStatus = 'Starting Phone Runner installation…';
     });
 
+    String? taskId;
     try {
+      taskId = await background.begin(
+        title: 'Nexus · Phone Runner',
+        status: 'Installing Flutter ARM64…',
+      );
       final result = await phoneRunner.installToolchain(
         onStatus: (status) {
+          if (taskId != null) {
+            background.update(taskId!, status: status);
+          }
           if (!mounted) return;
           setState(() => phoneRunnerStatus = status);
         },
       );
-      if (!mounted) return;
-      setState(() => phoneRunnerStatus = result.message);
+      if (mounted) {
+        setState(() => phoneRunnerStatus = result.message);
+      }
       await refreshPhoneRunner();
       await refreshRoute();
     } catch (error) {
-      if (!mounted) return;
-      setState(() => phoneRunnerStatus = 'Installation error: $error');
+      if (mounted) {
+        setState(() => phoneRunnerStatus = 'Installation error: $error');
+      }
     } finally {
+      if (taskId != null) {
+        await background.end(taskId);
+      }
       if (mounted) setState(() => phoneRunnerBusy = false);
     }
   }
@@ -268,21 +284,34 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
       phoneRunnerStatus = 'Verifying Phone Runner…';
     });
 
+    String? taskId;
     try {
+      taskId = await background.begin(
+        title: 'Nexus · Phone Runner',
+        status: 'Verifying Flutter ARM64 toolchain…',
+      );
       final result = await phoneRunner.verify(
         onStatus: (status) {
+          if (taskId != null) {
+            background.update(taskId!, status: status);
+          }
           if (!mounted) return;
           setState(() => phoneRunnerStatus = status);
         },
       );
-      if (!mounted) return;
-      setState(() => phoneRunnerStatus = result.message);
+      if (mounted) {
+        setState(() => phoneRunnerStatus = result.message);
+      }
       await refreshPhoneRunner();
       await refreshRoute();
     } catch (error) {
-      if (!mounted) return;
-      setState(() => phoneRunnerStatus = 'Verification error: $error');
+      if (mounted) {
+        setState(() => phoneRunnerStatus = 'Verification error: $error');
+      }
     } finally {
+      if (taskId != null) {
+        await background.end(taskId);
+      }
       if (mounted) setState(() => phoneRunnerBusy = false);
     }
   }
@@ -344,30 +373,43 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
       buildStatus = 'Preparing project build…';
     });
 
+    String? taskId;
     try {
+      taskId = await background.begin(
+        title: 'Nexus · ${widget.project.name}',
+        status: 'Preparing project build…',
+      );
       final conversation = await chats.listMessages(widget.project.id);
       final result = await ProjectBuildService.instance.buildAndAutoFix(
         project: widget.project,
         conversation: conversation,
         onStatus: (status) {
+          if (taskId != null) {
+            background.update(taskId!, status: status);
+          }
           if (!mounted) return;
           setState(() => buildStatus = status);
         },
       );
 
       final history = await integrations.listBuildRuns(widget.project.id);
-      if (!mounted) return;
-      setState(() {
-        runs = history;
-        buildStatus = result.message;
-      });
+      if (mounted) {
+        setState(() {
+          runs = history;
+          buildStatus = result.message;
+        });
+      }
 
       await refreshGit();
       await refreshRoute();
     } catch (error) {
-      if (!mounted) return;
-      setState(() => buildStatus = 'Build error: $error');
+      if (mounted) {
+        setState(() => buildStatus = 'Build error: $error');
+      }
     } finally {
+      if (taskId != null) {
+        await background.end(taskId);
+      }
       if (mounted) setState(() => building = false);
     }
   }
