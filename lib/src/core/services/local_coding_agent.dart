@@ -43,6 +43,7 @@ class LocalCodingAgent {
     required String projectDescription,
     required String framework,
     required List<ChatMessage> history,
+    void Function(String status)? onStatus,
   }) async {
     await _workspace.workspaceDirectory(projectId);
 
@@ -78,6 +79,11 @@ class LocalCodingAgent {
     ];
 
     for (var step = 0; step < 10; step++) {
+      onStatus?.call(
+        step == 0
+            ? 'Analyzing the request and project…'
+            : 'Thinking about the next project step…',
+      );
       final output = await LocalLlamaRuntime.instance.generateMessages(
         messages: messages,
         maxTokens: 1400,
@@ -130,6 +136,8 @@ class LocalCodingAgent {
             )
           : <String, dynamic>{};
 
+      onStatus?.call(_statusForTool(name, arguments));
+
       if (AgentToolExecutor.mutatingTools.contains(name) &&
           !snapshotCreated) {
         snapshotPath = await _workspace.createSnapshot(projectId);
@@ -167,6 +175,36 @@ class LocalCodingAgent {
       actions: actions,
       snapshotPath: snapshotPath,
     );
+  }
+
+  String _statusForTool(
+    String name,
+    Map<String, dynamic> arguments,
+  ) {
+    final path = arguments['path']?.toString().trim() ?? '';
+    return switch (name) {
+      'workspace_summary' => 'Inspecting project structure…',
+      'list_files' => 'Listing project files…',
+      'read_file' => path.isEmpty
+          ? 'Reading project file…'
+          : 'Reading $path…',
+      'search_code' => 'Searching project code…',
+      'git_status' => 'Checking local Git status…',
+      'git_diff' => 'Reviewing local changes…',
+      'create_file' => path.isEmpty
+          ? 'Creating project file…'
+          : 'Creating $path…',
+      'write_file' => path.isEmpty
+          ? 'Writing project file…'
+          : 'Writing $path…',
+      'replace_text' => path.isEmpty
+          ? 'Editing project file…'
+          : 'Editing $path…',
+      'delete_file' => path.isEmpty
+          ? 'Deleting project file…'
+          : 'Deleting $path…',
+      _ => 'Running Nexus project tool…',
+    };
   }
 
   String _systemPrompt({
