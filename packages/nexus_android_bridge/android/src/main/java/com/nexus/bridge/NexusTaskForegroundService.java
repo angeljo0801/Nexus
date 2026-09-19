@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.PowerManager;
 import android.os.IBinder;
 
 import androidx.annotation.Nullable;
@@ -24,9 +25,11 @@ public final class NexusTaskForegroundService extends Service {
     public static final String EXTRA_TITLE = "title";
     public static final String EXTRA_STATUS = "status";
     public static final String EXTRA_ELAPSED = "elapsed";
+    public static final String EXTRA_STARTED_AT_MILLIS = "startedAtMillis";
 
     private static final String CHANNEL_ID = "nexus_background_work";
     private static final int NOTIFICATION_ID = 7401;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
@@ -42,6 +45,7 @@ public final class NexusTaskForegroundService extends Service {
 
         final String action = intent.getAction();
         if (ACTION_STOP.equals(action)) {
+            releaseWakeLock();
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
@@ -59,11 +63,16 @@ public final class NexusTaskForegroundService extends Service {
                 intent.getStringExtra(EXTRA_ELAPSED),
                 "00:00"
         );
+        final long startedAtMillis = intent.getLongExtra(
+                EXTRA_STARTED_AT_MILLIS,
+                System.currentTimeMillis()
+        );
 
         final Notification notification =
-                buildNotification(title, status, elapsed);
+                buildNotification(title, status, elapsed, startedAtMillis);
 
         if (ACTION_START.equals(action)) {
+            acquireWakeLock();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                         NOTIFICATION_ID,
@@ -84,10 +93,35 @@ public final class NexusTaskForegroundService extends Service {
         return START_STICKY;
     }
 
+    private void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            return;
+        }
+        final PowerManager manager =
+                (PowerManager) getSystemService(POWER_SERVICE);
+        if (manager == null) {
+            return;
+        }
+        wakeLock = manager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "Nexus:BackgroundWork"
+        );
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire();
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        wakeLock = null;
+    }
+
     private Notification buildNotification(
             String title,
             String status,
-            String elapsed
+            String elapsed,
+            long startedAtMillis
     ) {
         final Intent launch =
                 getPackageManager().getLaunchIntentForPackage(getPackageName());
@@ -120,6 +154,8 @@ public final class NexusTaskForegroundService extends Service {
                 .setContentTitle(title)
                 .setContentText(status)
                 .setSubText(elapsed)
+                .setWhen(startedAtMillis)
+                .setUsesChronometer(true)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setCategory(Notification.CATEGORY_PROGRESS)
@@ -161,6 +197,12 @@ public final class NexusTaskForegroundService extends Service {
             return fallback;
         }
         return value;
+    }
+
+    @Override
+    public void onDestroy() {
+        releaseWakeLock();
+        super.onDestroy();
     }
 
     @Nullable
