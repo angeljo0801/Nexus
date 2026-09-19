@@ -1,11 +1,13 @@
 package com.nexus.bridge;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.ParcelFileDescriptor;
 
 import androidx.annotation.NonNull;
@@ -30,6 +32,7 @@ public final class NexusAndroidBridgePlugin
     private static final String TERMUX_RUN_PERMISSION =
             "com.termux.permission.RUN_COMMAND";
     private static final int TERMUX_PERMISSION_REQUEST = 7419;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 7420;
 
     private MethodChannel channel;
     private Context context;
@@ -37,6 +40,7 @@ public final class NexusAndroidBridgePlugin
     private ActivityPluginBinding activityBinding;
     private ParcelFileDescriptor sharedModelDescriptor;
     private MethodChannel.Result pendingPermissionResult;
+    private MethodChannel.Result pendingNotificationPermissionResult;
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
@@ -72,6 +76,18 @@ public final class NexusAndroidBridgePlugin
                 break;
             case "runTermuxScript":
                 runTermuxScript(call, result);
+                break;
+            case "requestTaskNotificationPermission":
+                requestTaskNotificationPermission(result);
+                break;
+            case "startBackgroundTask":
+                startBackgroundTask(call, result);
+                break;
+            case "updateBackgroundTask":
+                updateBackgroundTask(call, result);
+                break;
+            case "stopBackgroundTask":
+                stopBackgroundTask(result);
                 break;
             default:
                 result.notImplemented();
@@ -276,25 +292,162 @@ public final class NexusAndroidBridgePlugin
         }
     }
 
+    private void requestTaskNotificationPermission(
+            MethodChannel.Result result
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            result.success(true);
+            return;
+        }
+
+        if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) {
+            result.success(true);
+            return;
+        }
+
+        if (activity == null) {
+            result.success(false);
+            return;
+        }
+
+        if (pendingNotificationPermissionResult != null) {
+            result.error(
+                    "NOTIFICATION_PERMISSION_PENDING",
+                    "A notification permission request is already active.",
+                    null
+            );
+            return;
+        }
+
+        pendingNotificationPermissionResult = result;
+        activity.requestPermissions(
+                new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                NOTIFICATION_PERMISSION_REQUEST
+        );
+    }
+
+    private void startBackgroundTask(
+            MethodCall call,
+            MethodChannel.Result result
+    ) {
+        try {
+            final Intent intent = taskIntent(
+                    NexusTaskForegroundService.ACTION_START,
+                    call
+            );
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent);
+            } else {
+                context.startService(intent);
+            }
+            result.success(null);
+        } catch (Exception error) {
+            result.error(
+                    "BACKGROUND_TASK_START_FAILED",
+                    error.getMessage(),
+                    null
+            );
+        }
+    }
+
+    private void updateBackgroundTask(
+            MethodCall call,
+            MethodChannel.Result result
+    ) {
+        try {
+            context.startService(
+                    taskIntent(
+                            NexusTaskForegroundService.ACTION_UPDATE,
+                            call
+                    )
+            );
+            result.success(null);
+        } catch (Exception error) {
+            result.error(
+                    "BACKGROUND_TASK_UPDATE_FAILED",
+                    error.getMessage(),
+                    null
+            );
+        }
+    }
+
+    private void stopBackgroundTask(MethodChannel.Result result) {
+        try {
+            final Intent intent = new Intent(
+                    context,
+                    NexusTaskForegroundService.class
+            );
+            intent.setAction(NexusTaskForegroundService.ACTION_STOP);
+            context.startService(intent);
+            result.success(null);
+        } catch (Exception error) {
+            result.error(
+                    "BACKGROUND_TASK_STOP_FAILED",
+                    error.getMessage(),
+                    null
+            );
+        }
+    }
+
+    private Intent taskIntent(String action, MethodCall call) {
+        final Intent intent = new Intent(
+                context,
+                NexusTaskForegroundService.class
+        );
+        intent.setAction(action);
+
+        final String title = call.argument("title");
+        final String status = call.argument("status");
+        final String elapsed = call.argument("elapsed");
+
+        intent.putExtra(
+                NexusTaskForegroundService.EXTRA_TITLE,
+                title == null ? "Nexus is working" : title
+        );
+        intent.putExtra(
+                NexusTaskForegroundService.EXTRA_STATUS,
+                status == null ? "Working in the background…" : status
+        );
+        intent.putExtra(
+                NexusTaskForegroundService.EXTRA_ELAPSED,
+                elapsed == null ? "00:00" : elapsed
+        );
+        return intent;
+    }
+
     @Override
     public boolean onRequestPermissionsResult(
             int requestCode,
             @NonNull String[] permissions,
             @NonNull int[] grantResults
     ) {
-        if (requestCode != TERMUX_PERMISSION_REQUEST) {
-            return false;
+        if (requestCode == TERMUX_PERMISSION_REQUEST) {
+            final MethodChannel.Result result = pendingPermissionResult;
+            pendingPermissionResult = null;
+            if (result != null) {
+                result.success(
+                        grantResults.length > 0
+                                && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                );
+            }
+            return true;
         }
 
-        final MethodChannel.Result result = pendingPermissionResult;
-        pendingPermissionResult = null;
-        if (result != null) {
-            result.success(
-                    grantResults.length > 0
-                            && grantResults[0] == PackageManager.PERMISSION_GRANTED
-            );
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            final MethodChannel.Result result =
+                    pendingNotificationPermissionResult;
+            pendingNotificationPermissionResult = null;
+            if (result != null) {
+                result.success(
+                        grantResults.length > 0
+                                && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                );
+            }
+            return true;
         }
-        return true;
+
+        return false;
     }
 
     private void closeSharedModel() {
@@ -350,6 +503,14 @@ public final class NexusAndroidBridgePlugin
                     null
             );
             pendingPermissionResult = null;
+        }
+        if (pendingNotificationPermissionResult != null) {
+            pendingNotificationPermissionResult.error(
+                    "DETACHED",
+                    "Nexus detached while requesting notification permission.",
+                    null
+            );
+            pendingNotificationPermissionResult = null;
         }
         if (channel != null) {
             channel.setMethodCallHandler(null);
