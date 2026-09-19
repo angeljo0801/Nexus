@@ -254,7 +254,7 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
       final result = await phoneRunner.installToolchain(
         onStatus: (status) {
           if (taskId != null) {
-            background.update(taskId!, status: status);
+            background.update(taskId, status: status);
           }
           if (!mounted) return;
           setState(() => phoneRunnerStatus = status);
@@ -293,7 +293,7 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
       final result = await phoneRunner.verify(
         onStatus: (status) {
           if (taskId != null) {
-            background.update(taskId!, status: status);
+            background.update(taskId, status: status);
           }
           if (!mounted) return;
           setState(() => phoneRunnerStatus = status);
@@ -385,7 +385,7 @@ class _ProjectBuildsScreenState extends State<ProjectBuildsScreen> {
         conversation: conversation,
         onStatus: (status) {
           if (taskId != null) {
-            background.update(taskId!, status: status);
+            background.update(taskId, status: status);
           }
           if (!mounted) return;
           setState(() => buildStatus = status);
