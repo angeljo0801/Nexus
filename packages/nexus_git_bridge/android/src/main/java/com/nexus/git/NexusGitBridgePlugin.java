@@ -27,6 +27,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import android.os.Handler;
+import android.os.Looper;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.plugin.common.MethodCall;
@@ -36,6 +41,9 @@ public final class NexusGitBridgePlugin
         implements FlutterPlugin, MethodChannel.MethodCallHandler {
 
     private MethodChannel channel;
+    private final ExecutorService gitExecutor =
+            Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
@@ -48,45 +56,64 @@ public final class NexusGitBridgePlugin
             @NonNull MethodCall call,
             @NonNull MethodChannel.Result result
     ) {
-        try {
-            switch (call.method) {
-                case "init":
-                    init(call);
-                    result.success(null);
-                    break;
-                case "status":
-                    result.success(status(call));
-                    break;
-                case "diff":
-                    result.success(diff(call));
-                    break;
-                case "commitAll":
-                    result.success(commitAll(call));
-                    break;
-                case "setRemote":
-                    setRemote(call);
-                    result.success(null);
-                    break;
-                case "push":
-                    push(call);
-                    result.success(null);
-                    break;
-                case "clone":
-                    cloneRepository(call);
-                    result.success(null);
-                    break;
-                default:
-                    result.notImplemented();
+        gitExecutor.execute(() -> {
+            try {
+                switch (call.method) {
+                    case "init":
+                        init(call);
+                        postSuccess(result, null);
+                        break;
+                    case "status":
+                        postSuccess(result, status(call));
+                        break;
+                    case "diff":
+                        postSuccess(result, diff(call));
+                        break;
+                    case "commitAll":
+                        postSuccess(result, commitAll(call));
+                        break;
+                    case "setRemote":
+                        setRemote(call);
+                        postSuccess(result, null);
+                        break;
+                    case "push":
+                        push(call);
+                        postSuccess(result, null);
+                        break;
+                    case "clone":
+                        cloneRepository(call);
+                        postSuccess(result, null);
+                        break;
+                    default:
+                        mainHandler.post(result::notImplemented);
+                }
+            } catch (Exception error) {
+                postError(result, error);
             }
-        } catch (Exception error) {
-            result.error(
-                    "GIT_ERROR",
-                    error.getMessage() == null
-                            ? error.getClass().getSimpleName()
-                            : error.getMessage(),
-                    null
-            );
-        }
+        });
+    }
+
+    private void postSuccess(
+            MethodChannel.Result result,
+            Object value
+    ) {
+        mainHandler.post(() -> result.success(value));
+    }
+
+    private void postError(
+            MethodChannel.Result result,
+            Exception error
+    ) {
+        final String message = error.getMessage() == null
+                ? error.getClass().getSimpleName()
+                : error.getMessage();
+        mainHandler.post(
+                () -> result.error(
+                        "GIT_ERROR",
+                        message,
+                        error.getClass().getSimpleName()
+                )
+        );
     }
 
     private String requiredString(MethodCall call, String key) {
@@ -314,5 +341,6 @@ public final class NexusGitBridgePlugin
             channel.setMethodCallHandler(null);
         }
         channel = null;
+        gitExecutor.shutdownNow();
     }
 }
