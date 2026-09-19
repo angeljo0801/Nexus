@@ -26,6 +26,7 @@ class _ChatScreenState extends State<ChatScreen> {
   List<ChatMessage> messages = const [];
   bool loading = true;
   bool generating = false;
+  bool _sendLocked = false;
   String workingStatus = 'Nexus is working locally with project tools…';
 
   @override
@@ -51,8 +52,20 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> send() async {
+    if (_sendLocked || generating) return;
+
     final text = input.text.trim();
-    if (text.isEmpty || generating) return;
+    if (text.isEmpty) return;
+
+    // Lock synchronously before the first await so rapid taps / keyboard
+    // submissions cannot enqueue the same prompt twice.
+    _sendLocked = true;
+    if (mounted) {
+      setState(() {
+        generating = true;
+        workingStatus = 'Preparing Nexus local agent…';
+      });
+    }
 
     input.clear();
     await repository.addMessage(
@@ -62,25 +75,27 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     await loadMessages();
 
-    await LocalModelManager.instance.initialize();
-    if (!LocalModelManager.instance.hasActiveModel) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Install or link a Phone Local Model from the Models tab first.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      generating = true;
-      workingStatus = 'Nexus is inspecting and editing the project locally…';
-    });
-
     try {
+      await LocalModelManager.instance.initialize();
+      if (!LocalModelManager.instance.hasActiveModel) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Install or link a Phone Local Model from the Models tab first.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          workingStatus = 'Nexus is inspecting and editing the project locally…';
+        });
+      }
+
       final history = await repository.listMessages(widget.project.id);
       final result = await LocalCodingAgent.instance.run(
         projectId: widget.project.id,
@@ -137,6 +152,7 @@ class _ChatScreenState extends State<ChatScreen> {
         SnackBar(content: Text('Nexus agent error: $error')),
       );
     } finally {
+      _sendLocked = false;
       if (mounted) {
         setState(() {
           generating = false;
@@ -147,6 +163,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> stopGeneration() async {
+    if (mounted) {
+      setState(() => workingStatus = 'Stopping local generation…');
+    }
     await LocalLlamaRuntime.instance.stop();
   }
 
