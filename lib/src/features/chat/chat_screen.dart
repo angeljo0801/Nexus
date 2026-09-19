@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/models/chat_message.dart';
 import '../../core/models/nexus_project.dart';
+import '../../core/services/background_work_coordinator.dart';
 import '../../core/services/local_coding_agent.dart';
 import '../../core/services/local_llama_runtime.dart';
 import '../../core/services/local_model_manager.dart';
@@ -23,21 +26,35 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController input = TextEditingController();
   final ChatRepository repository = ChatRepository();
+  final NexusBackgroundWorkCoordinator background =
+      NexusBackgroundWorkCoordinator.instance;
+
   List<ChatMessage> messages = const [];
   bool loading = true;
   bool generating = false;
   bool _sendLocked = false;
+
   String workingStatus = 'Nexus is working locally with project tools…';
+  String elapsedText = '00:00';
+  DateTime? _generationStartedAt;
+  Timer? _elapsedTicker;
+  String? _activeBackgroundTaskId;
+
+  String get _backgroundTitle => 'Nexus · ${widget.project.name}';
 
   @override
   void initState() {
     super.initState();
     LocalModelManager.instance.initialize();
+    background.addListener(_syncBackgroundState);
+    _syncBackgroundState();
     loadMessages();
   }
 
   @override
   void dispose() {
+    background.removeListener(_syncBackgroundState);
+    _elapsedTicker?.cancel();
     input.dispose();
     super.dispose();
   }
@@ -51,31 +68,103 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _syncBackgroundState() {
+    NexusBackgroundTask? task;
+    for (final candidate in background.activeTasks.reversed) {
+      if (candidate.title == _backgroundTitle) {
+        task = candidate;
+        break;
+      }
+    }
+
+    if (!mounted) return;
+
+    if (task != null) {
+      final newStart = _generationStartedAt?.millisecondsSinceEpoch !=
+          task.startedAt.millisecondsSinceEpoch;
+      setState(() {
+        generating = true;
+        _activeBackgroundTaskId = task!.id;
+        _generationStartedAt = task.startedAt;
+        workingStatus = task.status;
+        elapsedText = NexusBackgroundWorkCoordinator.formatElapsed(
+          DateTime.now().difference(task.startedAt),
+        );
+      });
+      if (newStart) {
+        _startElapsedTicker(task.startedAt);
+      }
+      return;
+    }
+
+    if (generating && !_sendLocked) {
+      _elapsedTicker?.cancel();
+      setState(() {
+        generating = false;
+        _activeBackgroundTaskId = null;
+        _generationStartedAt = null;
+        elapsedText = '00:00';
+        workingStatus = 'Nexus is working locally with project tools…';
+      });
+      unawaited(loadMessages());
+    }
+  }
+
+  void _startElapsedTicker(DateTime startedAt) {
+    _elapsedTicker?.cancel();
+    _elapsedTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        elapsedText = NexusBackgroundWorkCoordinator.formatElapsed(
+          DateTime.now().difference(startedAt),
+        );
+      });
+    });
+  }
+
+  Future<void> _setWorkingStatus(String status) async {
+    final taskId = _activeBackgroundTaskId;
+    if (taskId != null) {
+      await background.update(taskId, status: status);
+    }
+    if (mounted) {
+      setState(() => workingStatus = status);
+    }
+  }
+
   Future<void> send() async {
     if (_sendLocked || generating) return;
 
     final text = input.text.trim();
     if (text.isEmpty) return;
 
-    // Lock synchronously before the first await so rapid taps / keyboard
-    // submissions cannot enqueue the same prompt twice.
     _sendLocked = true;
+    final startedAt = DateTime.now();
+    _generationStartedAt = startedAt;
+    _startElapsedTicker(startedAt);
+
     if (mounted) {
       setState(() {
         generating = true;
+        elapsedText = '00:00';
         workingStatus = 'Preparing Nexus local agent…';
       });
     }
 
-    input.clear();
-    await repository.addMessage(
-      projectId: widget.project.id,
-      role: 'user',
-      content: text,
-    );
-    await loadMessages();
-
     try {
+      _activeBackgroundTaskId = await background.begin(
+        title: _backgroundTitle,
+        status: 'Preparing Nexus local agent…',
+      );
+
+      input.clear();
+      await repository.addMessage(
+        projectId: widget.project.id,
+        role: 'user',
+        content: text,
+      );
+      await loadMessages();
+
       await LocalModelManager.instance.initialize();
       if (!LocalModelManager.instance.hasActiveModel) {
         if (mounted) {
@@ -90,11 +179,9 @@ class _ChatScreenState extends State<ChatScreen> {
         return;
       }
 
-      if (mounted) {
-        setState(() {
-          workingStatus = 'Nexus is inspecting and editing the project locally…';
-        });
-      }
+      await _setWorkingStatus(
+        'Nexus is inspecting and editing the project locally…',
+      );
 
       final history = await repository.listMessages(widget.project.id);
       final result = await LocalCodingAgent.instance.run(
@@ -103,6 +190,9 @@ class _ChatScreenState extends State<ChatScreen> {
         projectDescription: widget.project.description,
         framework: widget.project.framework,
         history: history,
+        onStatus: (status) {
+          unawaited(_setWorkingStatus(status));
+        },
       );
 
       var reply = result.response;
@@ -130,8 +220,7 @@ class _ChatScreenState extends State<ChatScreen> {
           project: widget.project,
           conversation: history,
           onStatus: (status) {
-            if (!mounted) return;
-            setState(() => workingStatus = status);
+            unawaited(_setWorkingStatus(status));
           },
         );
 
@@ -140,6 +229,7 @@ class _ChatScreenState extends State<ChatScreen> {
             '${build.lastRun?.remoteRunId.isNotEmpty == true ? '\nGitHub Actions run #${build.lastRun!.remoteRunId}.' : ''}';
       }
 
+      await _setWorkingStatus('Saving Nexus response…');
       await repository.addMessage(
         projectId: widget.project.id,
         role: 'assistant',
@@ -147,15 +237,24 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       await loadMessages();
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nexus agent error: $error')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Nexus agent error: $error')),
+        );
+      }
     } finally {
       _sendLocked = false;
+      final taskId = _activeBackgroundTaskId;
+      _activeBackgroundTaskId = null;
+      if (taskId != null) {
+        await background.end(taskId);
+      }
+      _elapsedTicker?.cancel();
       if (mounted) {
         setState(() {
           generating = false;
+          _generationStartedAt = null;
+          elapsedText = '00:00';
           workingStatus = 'Nexus is working locally with project tools…';
         });
       }
@@ -163,9 +262,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> stopGeneration() async {
-    if (mounted) {
-      setState(() => workingStatus = 'Stopping local generation…');
-    }
+    await _setWorkingStatus('Stopping local generation…');
     await LocalLlamaRuntime.instance.stop();
   }
 
@@ -177,7 +274,8 @@ class _ChatScreenState extends State<ChatScreen> {
           builder: (context) => AlertDialog(
             title: const Text('Clear project chat?'),
             content: const Text(
-              'This removes this conversation history. Project Memory and project files are kept separately.',
+              'This removes this conversation history. Project Memory and '
+              'project files are kept separately.',
             ),
             actions: [
               TextButton(
@@ -196,6 +294,45 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!confirmed) return;
     await repository.clearProjectChat(widget.project.id);
     await loadMessages();
+  }
+
+  Widget _workingBubble() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 520),
+        margin: const EdgeInsets.symmetric(vertical: 5),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(workingStatus),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Elapsed $elapsedText',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -245,12 +382,14 @@ class _ChatScreenState extends State<ChatScreen> {
         Expanded(
           child: loading
               ? const Center(child: CircularProgressIndicator())
-              : messages.isEmpty
+              : messages.isEmpty && !generating
                   ? const Center(
                       child: Padding(
                         padding: EdgeInsets.all(24),
                         child: Text(
-                          'Describe what you want to build or change. Nexus keeps the project local first, then uses the selected local or GitHub build route when one is available.',
+                          'Describe what you want to build or change. '
+                          'Nexus keeps the project local first, then uses the '
+                          'selected local or GitHub build route when available.',
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -260,26 +399,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       itemCount: messages.length + (generating ? 1 : 0),
                       itemBuilder: (context, index) {
                         if (generating && index == messages.length) {
-                          return Align(
-                            alignment: Alignment.centerLeft,
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Flexible(child: Text(workingStatus)),
-                                ],
-                              ),
-                            ),
-                          );
+                          return _workingBubble();
                         }
 
                         final message = messages[index];
