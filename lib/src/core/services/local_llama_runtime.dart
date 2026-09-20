@@ -207,7 +207,6 @@ class LocalLlamaRuntime {
     int maxTokens = 1200,
     double temperature = 0.25,
     String? template,
-    Duration timeout = const Duration(minutes: 8),
   }) {
     return _withGenerationLock(() async {
       final resolved = await _ensureLoaded();
@@ -254,25 +253,8 @@ class LocalLlamaRuntime {
         stream = startStream();
       }
 
-      var timedOut = false;
-      final timeoutTimer = Timer(timeout, () {
-        timedOut = true;
-        unawaited(_controller.stop());
-      });
-
-      try {
-        await for (final token in stream) {
-          buffer.write(token);
-        }
-      } finally {
-        timeoutTimer.cancel();
-      }
-
-      if (timedOut) {
-        throw TimeoutException(
-          'Local model generation exceeded ${timeout.inMinutes} minutes.',
-          timeout,
-        );
+      await for (final token in stream) {
+        buffer.write(token);
       }
 
       final result = buffer.toString().trim();
