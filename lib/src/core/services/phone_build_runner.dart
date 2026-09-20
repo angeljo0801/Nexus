@@ -144,16 +144,23 @@ class PhoneBuildRunner {
       }
 
       await prefs.remove(_verifiedKey);
-      final detail = native.errorMessage.trim().isNotEmpty
-          ? native.errorMessage.trim()
-          : native.stderr.trim().isNotEmpty
-              ? native.stderr.trim()
-              : 'One or more required Termux tools are missing.';
+
+      final missing = _parseMissingTools(native.stdout);
+      final failedCheck = _parseFailedCheck(native.stdout);
+      final detail = missing.isNotEmpty
+          ? 'Missing: ${missing.join(', ')}'
+          : failedCheck != null
+              ? 'Installed but not healthy: $failedCheck'
+              : native.errorMessage.trim().isNotEmpty
+                  ? native.errorMessage.trim()
+                  : native.stderr.trim().isNotEmpty
+                      ? native.stderr.trim()
+                      : 'Toolchain verification failed for an unknown reason.';
 
       return PhoneBuildExecutionResult(
         success: false,
         log: log,
-        message: 'Phone runner verification failed: $detail',
+        message: 'Phone runner verification failed. $detail',
         exitCode: native.exitCode,
       );
     } on TimeoutException {
@@ -530,7 +537,7 @@ class PhoneBuildRunner {
   }
 
   String _directVerificationScript() => '''
-set -Eeuo pipefail
+set -u
 PREFIX=/data/data/com.termux/files/usr
 HOME=/data/data/com.termux/files/home
 export PREFIX HOME
@@ -540,17 +547,63 @@ if [ -f "\$PREFIX/etc/profile.d/flutter.sh" ]; then
 fi
 
 echo "NEXUS_TERMUX_COMMAND_OK"
-command -v bash
-command -v java
-java -version
-command -v aapt2
-command -v flutter
-flutter --version
-if command -v flutter-termux >/dev/null 2>&1; then
-  flutter-termux --check
+
+missing=()
+for tool in bash java aapt2 flutter dart git curl unzip cmake ninja clang; do
+  if ! command -v "\$tool" >/dev/null 2>&1; then
+    missing+=("\$tool")
+  fi
+done
+
+if [ "${#missing[@]}" -gt 0 ]; then
+  joined=""
+  for tool in "${missing[@]}"; do
+    if [ -z "\$joined" ]; then
+      joined="\$tool"
+    else
+      joined="\$joined,\$tool"
+    fi
+  done
+  echo "NEXUS_MISSING=\$joined"
+  exit 20
 fi
+
+java -version
+flutter --version
+dart --version
+
+if command -v flutter-termux >/dev/null 2>&1; then
+  if ! flutter-termux --check; then
+    echo "NEXUS_CHECK_FAILED=flutter-termux"
+    exit 21
+  fi
+fi
+
 echo "NEXUS_VERIFY_OK"
 ''';
+
+  List<String> _parseMissingTools(String stdout) {
+    for (final line in const LineSplitter().convert(stdout)) {
+      if (!line.startsWith('NEXUS_MISSING=')) continue;
+      return line
+          .substring('NEXUS_MISSING='.length)
+          .split(',')
+          .map((tool) => tool.trim())
+          .where((tool) => tool.isNotEmpty)
+          .toList();
+    }
+    return const [];
+  }
+
+  String? _parseFailedCheck(String stdout) {
+    for (final line in const LineSplitter().convert(stdout)) {
+      if (!line.startsWith('NEXUS_CHECK_FAILED=')) continue;
+      final value =
+          line.substring('NEXUS_CHECK_FAILED='.length).trim();
+      return value.isEmpty ? null : value;
+    }
+    return null;
+  }
 
   String _directInstallerScript() => '''
 set -Eeuo pipefail
