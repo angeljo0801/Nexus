@@ -546,6 +546,28 @@ curl -fsS -H "X-Nexus-Token: \$NEXUS_TOKEN" \
 unzip -q "\$ROOT/project.zip" -d "\$ROOT/project"
 cd "\$ROOT/project"
 
+if [ ! -f android/app/build.gradle.kts ] && [ ! -f android/app/build.gradle ]; then
+  nexus_phase "Generating missing Android scaffold in temporary build copy…"
+  PROJECT_NAME=\$(sed -n 's/^name:[[:space:]]*//p' pubspec.yaml | head -n 1 | tr -cd 'a-zA-Z0-9_')
+  if [ -z "\$PROJECT_NAME" ]; then
+    PROJECT_NAME="nexus_app"
+  fi
+
+  rm -rf "\$ROOT/lib-backup"
+  if [ -d lib ]; then
+    cp -a lib "\$ROOT/lib-backup"
+  fi
+  cp pubspec.yaml "\$ROOT/pubspec.yaml.backup"
+
+  flutter create --platforms=android --project-name "\$PROJECT_NAME" .
+
+  if [ -d "\$ROOT/lib-backup" ]; then
+    rm -rf lib
+    cp -a "\$ROOT/lib-backup" lib
+  fi
+  cp "\$ROOT/pubspec.yaml.backup" pubspec.yaml
+fi
+
 nexus_phase "Preparing Termux Android build settings…"
 mkdir -p android
 touch android/gradle.properties
