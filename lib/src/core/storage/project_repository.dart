@@ -34,6 +34,12 @@ class ProjectRepository {
 
     final db = await _database.database;
     await db.insert('projects', project.toMap());
+    await ProjectWorkspaceService.instance.ensureStarterFiles(
+      projectId: project.id,
+      framework: project.framework,
+      projectName: project.name,
+      description: project.description,
+    );
     return project;
   }
 
