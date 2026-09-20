@@ -78,7 +78,9 @@ class _ProjectFilesScreenState extends State<ProjectFilesScreen> {
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(16),
                     child: SelectableText(
-                      content,
+                      content.trim().isEmpty
+                          ? '(This file is empty.)'
+                          : content,
                       style: const TextStyle(
                         fontFamily: 'monospace',
                         fontSize: 13,
