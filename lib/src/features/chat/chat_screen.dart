@@ -9,6 +9,7 @@ import '../../core/services/local_coding_agent.dart';
 import '../../core/services/local_llama_runtime.dart';
 import '../../core/services/local_model_manager.dart';
 import '../../core/services/project_build_service.dart';
+import '../../core/services/project_workspace_service.dart';
 import '../../core/storage/chat_repository.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -153,6 +154,13 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
+      await ProjectWorkspaceService.instance.ensureStarterFiles(
+        projectId: widget.project.id,
+        framework: widget.project.framework,
+        projectName: widget.project.name,
+        description: widget.project.description,
+      );
+
       _activeBackgroundTaskId = await background.begin(
         title: _backgroundTitle,
         status: 'Preparing Nexus local agent…',
