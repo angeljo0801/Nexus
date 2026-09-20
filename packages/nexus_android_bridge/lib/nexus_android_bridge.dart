@@ -20,6 +20,35 @@ class NexusTermuxStatus {
   }
 }
 
+
+class NexusTermuxCommandResult {
+  const NexusTermuxCommandResult({
+    required this.exitCode,
+    required this.errCode,
+    required this.stdout,
+    required this.stderr,
+    required this.errorMessage,
+  });
+
+  final int exitCode;
+  final int errCode;
+  final String stdout;
+  final String stderr;
+  final String errorMessage;
+
+  bool get success => exitCode == 0 && (errCode == -1 || errCode == 0);
+
+  factory NexusTermuxCommandResult.fromMap(Map<Object?, Object?> map) {
+    return NexusTermuxCommandResult(
+      exitCode: (map['exitCode'] as num?)?.toInt() ?? -1,
+      errCode: (map['errCode'] as num?)?.toInt() ?? 0,
+      stdout: map['stdout']?.toString() ?? '',
+      stderr: map['stderr']?.toString() ?? '',
+      errorMessage: map['errorMessage']?.toString() ?? '',
+    );
+  }
+}
+
 class NexusAndroidBridge {
   NexusAndroidBridge._();
 
@@ -70,6 +99,20 @@ class NexusAndroidBridge {
         'label': label,
       },
     );
+  }
+
+  static Future<NexusTermuxCommandResult> runTermuxScriptForResult(
+    String script, {
+    String label = 'Nexus Phone Runner',
+  }) async {
+    final raw = await _channel.invokeMethod<Map<Object?, Object?>>(
+      'runTermuxScriptForResult',
+      {
+        'script': script,
+        'label': label,
+      },
+    );
+    return NexusTermuxCommandResult.fromMap(raw ?? const {});
   }
 
   static Future<bool> requestTaskNotificationPermission() async {
