@@ -12,6 +12,9 @@
 
     <application>
         <service
+            android:name="com.nexus.bridge.NexusTermuxResultService"
+            android:exported="false" />
+        <service
             android:name="com.nexus.bridge.NexusTaskForegroundService"
             android:exported="false"
             android:stopWithTask="false"
