@@ -7,10 +7,12 @@ class AgentToolResult {
   const AgentToolResult({
     required this.text,
     this.changedWorkspace = false,
+    this.success = true,
   });
 
   final String text;
   final bool changedWorkspace;
+  final bool success;
 }
 
 class AgentToolExecutor {
@@ -60,19 +62,35 @@ class AgentToolExecutor {
 
         case 'create_file':
           final path = _requiredString(arguments, 'path');
-          final content = _string(arguments, 'content');
+          final content = _requiredContent(arguments, 'content', path);
           await _workspace.createFile(projectId, path, content);
+          final verified = await _workspace.readFile(projectId, path);
+          if (verified != content || verified.trim().isEmpty) {
+            throw StateError('File verification failed after create: $path');
+          }
           return AgentToolResult(
-            text: jsonEncode({'created': path}),
+            text: jsonEncode({
+              'created': path,
+              'verified': true,
+              'characters': verified.length,
+            }),
             changedWorkspace: true,
           );
 
         case 'write_file':
           final path = _requiredString(arguments, 'path');
-          final content = _string(arguments, 'content');
+          final content = _requiredContent(arguments, 'content', path);
           await _workspace.writeFile(projectId, path, content);
+          final verified = await _workspace.readFile(projectId, path);
+          if (verified != content || verified.trim().isEmpty) {
+            throw StateError('File verification failed after write: $path');
+          }
           return AgentToolResult(
-            text: jsonEncode({'written': path}),
+            text: jsonEncode({
+              'written': path,
+              'verified': true,
+              'characters': verified.length,
+            }),
             changedWorkspace: true,
           );
 
@@ -137,6 +155,7 @@ class AgentToolExecutor {
               'error': 'Unknown tool',
               'tool': name,
             }),
+            success: false,
           );
       }
     } catch (error) {
@@ -145,8 +164,23 @@ class AgentToolExecutor {
           'error': error.toString(),
           'tool': name,
         }),
+        success: false,
       );
     }
+  }
+
+  static String _requiredContent(
+    Map<String, dynamic> arguments,
+    String key,
+    String path,
+  ) {
+    final value = arguments[key]?.toString() ?? '';
+    if (value.trim().isEmpty) {
+      throw ArgumentError(
+        'Refusing to create an empty file: $path. Provide real file content.',
+      );
+    }
+    return value;
   }
 
   static String _requiredString(
