@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:llama_flutter_android/llama_flutter_android.dart' as llama;
