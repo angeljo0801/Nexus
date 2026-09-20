@@ -230,7 +230,6 @@ class LocalCodingAgent {
                   'changed until a tool result confirms success.',
         ),
       );
-      );
     }
 
     return CodingAgentResult(
