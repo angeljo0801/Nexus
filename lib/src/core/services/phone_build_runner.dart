@@ -606,69 +606,6 @@ nexus_complete() {
 }
 ''';
 
-  String _verificationScript(_PhoneRunnerSession session) => '''
-set -Eeuo pipefail
-PREFIX=/data/data/com.termux/files/usr
-HOME=/data/data/com.termux/files/home
-export PREFIX HOME
-NEXUS_LOG="\$HOME/.nexus/verify.log"
-mkdir -p "\$HOME/.nexus"
-: > "\$NEXUS_LOG"
-exec > >(tee -a "\$NEXUS_LOG") 2>&1
-${_callbackFunctions(session)}
-trap 'code=\$?; nexus_complete false "\$code" "Phone runner verification failed"; exit "\$code"' ERR
-
-command -v curl >/dev/null
-if [ -f "\$PREFIX/etc/profile.d/flutter.sh" ]; then
-  source "\$PREFIX/etc/profile.d/flutter.sh"
-fi
-nexus_phase "Checking Flutter ARM64 toolchain…"
-command -v flutter
-flutter --version
-if command -v flutter-termux >/dev/null 2>&1; then
-  flutter-termux --check
-fi
-command -v java
-java -version
-command -v aapt2
-nexus_complete true 0 "Flutter $flutterVersion phone runner verified"
-''';
-
-  String _installerScript(_PhoneRunnerSession session) => '''
-set -Eeuo pipefail
-PREFIX=/data/data/com.termux/files/usr
-HOME=/data/data/com.termux/files/home
-export PREFIX HOME
-mkdir -p "\$HOME/.nexus"
-NEXUS_LOG="\$HOME/.nexus/install.log"
-: > "\$NEXUS_LOG"
-exec > >(tee -a "\$NEXUS_LOG") 2>&1
-
-pkg update -y
-pkg install -y x11-repo wget curl unzip openjdk-21 openjdk-17
-${_callbackFunctions(session)}
-trap 'code=\$?; nexus_complete false "\$code" "Flutter ARM64 installation failed"; exit "\$code"' ERR
-
-nexus_phase "Downloading Flutter $flutterVersion for Termux ARM64…"
-PKG="\$HOME/.nexus/flutter_${flutterVersion}_aarch64.deb"
-wget -O "\$PKG" "$flutterPackageUrl"
-echo "$flutterPackageSha256  \$PKG" | sha256sum -c -
-
-nexus_phase "Installing Flutter ARM64 package…"
-dpkg -i "\$PKG" || apt --fix-broken install -y
-bash "\$PREFIX/share/flutter/post_install.sh"
-source "\$PREFIX/etc/profile.d/flutter.sh"
-
-nexus_phase "Verifying the phone build toolchain…"
-flutter --version
-if command -v flutter-termux >/dev/null 2>&1; then
-  flutter-termux --check
-fi
-flutter doctor -v || true
-command -v aapt2
-nexus_complete true 0 "Flutter $flutterVersion ARM64 installed and verified"
-''';
-
   String _buildScript(_PhoneRunnerSession session) => '''
 set -Eeuo pipefail
 PREFIX=/data/data/com.termux/files/usr
