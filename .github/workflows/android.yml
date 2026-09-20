@@ -10,7 +10,6 @@ on:
       - "test/**"
       - "pubspec.yaml"
       - "analysis_options.yaml"
-      - "tool/**"
       - ".github/workflows/android.yml"
 
 permissions:
@@ -37,7 +36,6 @@ jobs:
             flutter create --platforms=android --org com.nexus.local .
           fi
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/' android/app/build.gradle.kts
-          bash tool/configure_android_background_engine.sh
 
       - name: Dependencies
         run: flutter pub get
