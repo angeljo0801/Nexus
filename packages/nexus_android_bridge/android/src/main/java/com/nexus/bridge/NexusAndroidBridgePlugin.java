@@ -2,18 +2,24 @@ package com.nexus.bridge;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 
 import androidx.annotation.NonNull;
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityAware;
@@ -33,6 +39,12 @@ public final class NexusAndroidBridgePlugin
             "com.termux.permission.RUN_COMMAND";
     private static final int TERMUX_PERMISSION_REQUEST = 7419;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 7420;
+    private static final AtomicInteger TERMUX_REQUEST_IDS =
+            new AtomicInteger(7600);
+    private static final ConcurrentHashMap<Integer, MethodChannel.Result>
+            TERMUX_RESULTS = new ConcurrentHashMap<>();
+    private static final Handler MAIN_HANDLER =
+            new Handler(Looper.getMainLooper());
 
     private MethodChannel channel;
     private Context context;
@@ -76,6 +88,9 @@ public final class NexusAndroidBridgePlugin
                 break;
             case "runTermuxScript":
                 runTermuxScript(call, result);
+                break;
+            case "runTermuxScriptForResult":
+                runTermuxScriptForResult(call, result);
                 break;
             case "requestTaskNotificationPermission":
                 requestTaskNotificationPermission(result);
@@ -216,6 +231,60 @@ public final class NexusAndroidBridgePlugin
         }
     }
 
+    private Intent buildTermuxIntent(
+            String script,
+            String label
+    ) {
+        final Intent intent = new Intent();
+        intent.setClassName(
+                TERMUX_PACKAGE,
+                "com.termux.app.RunCommandService"
+        );
+        intent.setAction("com.termux.RUN_COMMAND");
+        intent.putExtra(
+                "com.termux.RUN_COMMAND_PATH",
+                "/data/data/com.termux/files/usr/bin/bash"
+        );
+        intent.putExtra(
+                "com.termux.RUN_COMMAND_ARGUMENTS",
+                new String[]{"-lc", script}
+        );
+        intent.putExtra(
+                "com.termux.RUN_COMMAND_WORKDIR",
+                "/data/data/com.termux/files/home"
+        );
+        intent.putExtra(
+                "com.termux.RUN_COMMAND_BACKGROUND",
+                true
+        );
+        intent.putExtra(
+                "com.termux.RUN_COMMAND_COMMAND_LABEL",
+                label == null ? "Nexus Phone Build" : label
+        );
+        intent.putExtra(
+                "com.termux.RUN_COMMAND_COMMAND_DESCRIPTION",
+                "Runs a Nexus-approved local build inside Termux."
+        );
+        return intent;
+    }
+
+    private boolean validateTermuxReady(MethodChannel.Result result) {
+        final Map<String, Object> status = termuxStatus();
+        if (!Boolean.TRUE.equals(status.get("installed"))) {
+            result.error("TERMUX_MISSING", "Termux is not installed.", null);
+            return false;
+        }
+        if (!Boolean.TRUE.equals(status.get("runCommandPermission"))) {
+            result.error(
+                    "TERMUX_PERMISSION",
+                    "Grant Nexus permission to run commands in Termux.",
+                    null
+            );
+            return false;
+        }
+        return true;
+    }
+
     private void runTermuxScript(
             MethodCall call,
             MethodChannel.Result result
@@ -227,58 +296,12 @@ public final class NexusAndroidBridgePlugin
             result.error("EMPTY_SCRIPT", "No Termux script was provided.", null);
             return;
         }
-
-        final Map<String, Object> status = termuxStatus();
-        if (!Boolean.TRUE.equals(status.get("installed"))) {
-            result.error("TERMUX_MISSING", "Termux is not installed.", null);
-            return;
-        }
-        if (!Boolean.TRUE.equals(status.get("runCommandPermission"))) {
-            result.error(
-                    "TERMUX_PERMISSION",
-                    "Grant Nexus permission to run commands in Termux.",
-                    null
-            );
+        if (!validateTermuxReady(result)) {
             return;
         }
 
         try {
-            final Intent intent = new Intent();
-            intent.setClassName(
-                    TERMUX_PACKAGE,
-                    "com.termux.app.RunCommandService"
-            );
-            intent.setAction("com.termux.RUN_COMMAND");
-            intent.putExtra(
-                    "com.termux.RUN_COMMAND_PATH",
-                    "/data/data/com.termux/files/usr/bin/bash"
-            );
-            intent.putExtra(
-                    "com.termux.RUN_COMMAND_ARGUMENTS",
-                    new String[]{"-s"}
-            );
-            intent.putExtra(
-                    "com.termux.RUN_COMMAND_WORKDIR",
-                    "/data/data/com.termux/files/home"
-            );
-            intent.putExtra(
-                    "com.termux.RUN_COMMAND_BACKGROUND",
-                    true
-            );
-            intent.putExtra(
-                    "com.termux.RUN_COMMAND_STDIN",
-                    script
-            );
-            intent.putExtra(
-                    "com.termux.RUN_COMMAND_COMMAND_LABEL",
-                    label == null ? "Nexus Phone Build" : label
-            );
-            intent.putExtra(
-                    "com.termux.RUN_COMMAND_COMMAND_DESCRIPTION",
-                    "Runs a Nexus-approved local build inside Termux."
-            );
-
-            context.startService(intent);
+            context.startService(buildTermuxIntent(script, label));
             result.success(null);
         } catch (SecurityException error) {
             result.error(
@@ -290,6 +313,108 @@ public final class NexusAndroidBridgePlugin
         } catch (Exception error) {
             result.error("TERMUX_RUN_FAILED", error.getMessage(), null);
         }
+    }
+
+    private void runTermuxScriptForResult(
+            MethodCall call,
+            MethodChannel.Result result
+    ) {
+        final String script = call.argument("script");
+        final String label = call.argument("label");
+
+        if (script == null || script.trim().isEmpty()) {
+            result.error("EMPTY_SCRIPT", "No Termux script was provided.", null);
+            return;
+        }
+        if (!validateTermuxReady(result)) {
+            return;
+        }
+
+        final int requestId = TERMUX_REQUEST_IDS.incrementAndGet();
+
+        try {
+            final Intent callbackIntent = new Intent(
+                    context,
+                    NexusTermuxResultService.class
+            );
+            callbackIntent.putExtra(
+                    NexusTermuxResultService.EXTRA_REQUEST_ID,
+                    requestId
+            );
+
+            int flags = PendingIntent.FLAG_ONE_SHOT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                flags |= PendingIntent.FLAG_MUTABLE;
+            }
+
+            final PendingIntent pendingIntent = PendingIntent.getService(
+                    context,
+                    requestId,
+                    callbackIntent,
+                    flags
+            );
+
+            final Intent intent = buildTermuxIntent(script, label);
+            intent.putExtra(
+                    "com.termux.RUN_COMMAND_PENDING_INTENT",
+                    pendingIntent
+            );
+
+            TERMUX_RESULTS.put(requestId, result);
+            context.startService(intent);
+        } catch (Exception error) {
+            TERMUX_RESULTS.remove(requestId);
+            result.error(
+                    "TERMUX_RUN_FAILED",
+                    error.getMessage(),
+                    null
+            );
+        }
+    }
+
+    static void deliverTermuxResult(
+            int requestId,
+            Bundle bundle
+    ) {
+        final MethodChannel.Result result = TERMUX_RESULTS.remove(requestId);
+        if (result == null) {
+            return;
+        }
+
+        final HashMap<String, Object> payload = new HashMap<>();
+        if (bundle == null) {
+            payload.put("exitCode", -1);
+            payload.put("errCode", 1);
+            payload.put("stdout", "");
+            payload.put("stderr", "");
+            payload.put(
+                    "errorMessage",
+                    "Termux returned no result bundle."
+            );
+        } else {
+            payload.put(
+                    "exitCode",
+                    bundle.getInt("exitCode", -1)
+            );
+            payload.put(
+                    "errCode",
+                    bundle.getInt("err", 0)
+            );
+            payload.put(
+                    "stdout",
+                    bundle.getString("stdout", "")
+            );
+            payload.put(
+                    "stderr",
+                    bundle.getString("stderr", "")
+            );
+            payload.put(
+                    "errorMessage",
+                    bundle.getString("errmsg", "")
+            );
+        }
+
+        MAIN_HANDLER.post(() -> result.success(payload));
     }
 
     private void requestTaskNotificationPermission(
