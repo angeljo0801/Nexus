@@ -24,6 +24,103 @@ class _ProjectDraft {
   final String framework;
 }
 
+class _NewProjectDialog extends StatefulWidget {
+  const _NewProjectDialog();
+
+  @override
+  State<_NewProjectDialog> createState() => _NewProjectDialogState();
+}
+
+class _NewProjectDialogState extends State<_NewProjectDialog> {
+  final TextEditingController _name = TextEditingController();
+  final TextEditingController _description = TextEditingController();
+  String _framework = 'Flutter';
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _description.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final projectName = _name.text.trim();
+    if (projectName.isEmpty) return;
+
+    Navigator.of(context).pop(
+      _ProjectDraft(
+        name: projectName,
+        description: _description.text.trim(),
+        framework: _framework,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('New app project'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _name,
+              autofocus: true,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Project name',
+                hintText: 'My App',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _description,
+              minLines: 2,
+              maxLines: 4,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(
+                labelText: 'What do you want to build?',
+                hintText: 'Describe the application and its main goal.',
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _framework,
+              decoration: const InputDecoration(
+                labelText: 'Starting framework',
+              ),
+              items: const [
+                DropdownMenuItem(value: 'Flutter', child: Text('Flutter')),
+                DropdownMenuItem(
+                  value: 'Android Native',
+                  child: Text('Android Native'),
+                ),
+                DropdownMenuItem(value: 'Other', child: Text('Other')),
+              ],
+              onChanged: (value) {
+                if (value == null || value == _framework) return;
+                setState(() => _framework = value);
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Create Project'),
+        ),
+      ],
+    );
+  }
+}
+
 class _ProjectsScreenState extends State<ProjectsScreen> {
   final ProjectRepository repository = ProjectRepository();
   List<NexusProject> projects = const [];
@@ -45,91 +142,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> createProject() async {
-    final name = TextEditingController();
-    final description = TextEditingController();
-    var framework = 'Flutter';
-
     final draft = await showDialog<_ProjectDraft>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: const Text('New app project'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: name,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Project name',
-                      hintText: 'My App',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: description,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'What do you want to build?',
-                      hintText: 'Describe the application and its main goal.',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: framework,
-                    decoration: const InputDecoration(
-                      labelText: 'Starting framework',
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'Flutter', child: Text('Flutter')),
-                      DropdownMenuItem(
-                        value: 'Android Native',
-                        child: Text('Android Native'),
-                      ),
-                      DropdownMenuItem(value: 'Other', child: Text('Other')),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        setDialogState(() => framework = value);
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final projectName = name.text.trim();
-                  if (projectName.isEmpty) return;
-                  Navigator.pop(
-                    context,
-                    _ProjectDraft(
-                      name: projectName,
-                      description: description.text.trim(),
-                      framework: framework,
-                    ),
-                  );
-                },
-                child: const Text('Create Project'),
-              ),
-            ],
-          );
-        },
-      ),
+      builder: (_) => const _NewProjectDialog(),
     );
 
-    name.dispose();
-    description.dispose();
-
     if (draft == null || !mounted) return;
+
+    // Let the dialog finish its route teardown before creating/pushing the
+    // project workspace. This avoids overlapping the dialog's inherited
+    // widget deactivation with the next route.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
 
     final project = await repository.createProject(
       name: draft.name,
@@ -140,7 +164,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     if (!mounted) return;
     await loadProjects();
     if (!mounted) return;
-    openProject(project);
+
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await openProject(project);
   }
 
   Future<void> deleteProject(NexusProject project) async {
