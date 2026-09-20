@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/nexus_project.dart';
+import '../../core/services/project_workspace_service.dart';
 import '../../core/storage/project_repository.dart';
 import 'project_workspace_screen.dart';
 
@@ -169,7 +170,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     await loadProjects();
   }
 
-  void openProject(NexusProject project) {
+  Future<void> openProject(NexusProject project) async {
+    await ProjectWorkspaceService.instance.ensureStarterFiles(
+      projectId: project.id,
+      framework: project.framework,
+      projectName: project.name,
+      description: project.description,
+    );
+    if (!mounted) return;
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ProjectWorkspaceScreen(project: project),
