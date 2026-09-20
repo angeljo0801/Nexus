@@ -113,21 +113,69 @@ class PhoneBuildRunner {
       );
     }
 
-    onStatus?.call('Checking Flutter ARM64 inside Termux…');
-    final result = await _runCallbackSession(
-      label: 'Nexus Phone Runner Check',
-      timeout: const Duration(minutes: 3),
-      onStatus: onStatus,
-      scriptBuilder: (session) => _verificationScript(session),
-    );
+    onStatus?.call('Checking Flutter ARM64 directly through Termux…');
 
-    final prefs = await SharedPreferences.getInstance();
-    if (result.success) {
-      await prefs.setBool(_verifiedKey, true);
-    } else {
+    try {
+      final native = await NexusAndroidBridge.runTermuxScriptForResult(
+        _directVerificationScript(),
+        label: 'Nexus Phone Runner Check',
+      ).timeout(const Duration(minutes: 3));
+
+      final log = [
+        if (native.stdout.trim().isNotEmpty) native.stdout.trim(),
+        if (native.stderr.trim().isNotEmpty) native.stderr.trim(),
+        if (native.errorMessage.trim().isNotEmpty)
+          'Termux: ${native.errorMessage.trim()}',
+      ].join('\n');
+
+      final success =
+          native.success && native.stdout.contains('NEXUS_VERIFY_OK');
+      final prefs = await SharedPreferences.getInstance();
+
+      if (success) {
+        await prefs.setBool(_verifiedKey, true);
+        return PhoneBuildExecutionResult(
+          success: true,
+          log: log,
+          message:
+              'Flutter $flutterVersion ARM64 phone runner verified successfully.',
+          exitCode: native.exitCode,
+        );
+      }
+
       await prefs.remove(_verifiedKey);
+      final detail = native.errorMessage.trim().isNotEmpty
+          ? native.errorMessage.trim()
+          : native.stderr.trim().isNotEmpty
+              ? native.stderr.trim()
+              : 'One or more required Termux tools are missing.';
+
+      return PhoneBuildExecutionResult(
+        success: false,
+        log: log,
+        message: 'Phone runner verification failed: $detail',
+        exitCode: native.exitCode,
+      );
+    } on TimeoutException {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_verifiedKey);
+      return PhoneBuildExecutionResult(
+        success: false,
+        log: '',
+        message:
+            'Termux did not return a direct command result. Confirm that '
+            'allow-external-apps=true is active and that your Termux version '
+            'supports RUN_COMMAND results (0.109 or newer).',
+      );
+    } catch (error) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_verifiedKey);
+      return PhoneBuildExecutionResult(
+        success: false,
+        log: '',
+        message: 'Phone runner verification error: $error',
+      );
     }
-    return result;
   }
 
   Future<PhoneBuildExecutionResult> installToolchain({
@@ -150,21 +198,69 @@ class PhoneBuildRunner {
       );
     }
 
-    onStatus?.call('Installing Flutter $flutterVersion ARM64 in Termux…');
-    final result = await _runCallbackSession(
-      label: 'Install Nexus Phone Runner',
-      timeout: const Duration(minutes: 45),
-      onStatus: onStatus,
-      scriptBuilder: (session) => _installerScript(session),
+    onStatus?.call(
+      'Installing Flutter $flutterVersion ARM64 and Android build tools in Termux…',
     );
 
-    final prefs = await SharedPreferences.getInstance();
-    if (result.success) {
-      await prefs.setBool(_verifiedKey, true);
-    } else {
+    try {
+      final native = await NexusAndroidBridge.runTermuxScriptForResult(
+        _directInstallerScript(),
+        label: 'Install Nexus Phone Runner',
+      ).timeout(const Duration(minutes: 60));
+
+      final log = [
+        if (native.stdout.trim().isNotEmpty) native.stdout.trim(),
+        if (native.stderr.trim().isNotEmpty) native.stderr.trim(),
+        if (native.errorMessage.trim().isNotEmpty)
+          'Termux: ${native.errorMessage.trim()}',
+      ].join('\n');
+
+      final success =
+          native.success && native.stdout.contains('NEXUS_INSTALL_OK');
+      final prefs = await SharedPreferences.getInstance();
+
+      if (success) {
+        await prefs.setBool(_verifiedKey, true);
+        return PhoneBuildExecutionResult(
+          success: true,
+          log: log,
+          message:
+              'Flutter $flutterVersion ARM64 and the Android phone build toolchain are installed and verified.',
+          exitCode: native.exitCode,
+        );
+      }
+
       await prefs.remove(_verifiedKey);
+      final detail = native.errorMessage.trim().isNotEmpty
+          ? native.errorMessage.trim()
+          : native.stderr.trim().isNotEmpty
+              ? native.stderr.trim()
+              : 'The Termux installer exited before verification completed.';
+
+      return PhoneBuildExecutionResult(
+        success: false,
+        log: log,
+        message: 'Phone Runner installation failed: $detail',
+        exitCode: native.exitCode,
+      );
+    } on TimeoutException {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_verifiedKey);
+      return const PhoneBuildExecutionResult(
+        success: false,
+        log: '',
+        message:
+            'The Termux installation did not return a result within 60 minutes.',
+      );
+    } catch (error) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_verifiedKey);
+      return PhoneBuildExecutionResult(
+        success: false,
+        log: '',
+        message: 'Phone Runner installation error: $error',
+      );
     }
-    return result;
   }
 
   Future<PhoneBuildExecutionResult> build({
@@ -432,6 +528,57 @@ class PhoneBuildRunner {
       await server.close(force: true);
     }
   }
+
+  String _directVerificationScript() => '''
+set -Eeuo pipefail
+PREFIX=/data/data/com.termux/files/usr
+HOME=/data/data/com.termux/files/home
+export PREFIX HOME
+
+if [ -f "\$PREFIX/etc/profile.d/flutter.sh" ]; then
+  source "\$PREFIX/etc/profile.d/flutter.sh"
+fi
+
+echo "NEXUS_TERMUX_COMMAND_OK"
+command -v bash
+command -v java
+java -version
+command -v aapt2
+command -v flutter
+flutter --version
+if command -v flutter-termux >/dev/null 2>&1; then
+  flutter-termux --check
+fi
+echo "NEXUS_VERIFY_OK"
+''';
+
+  String _directInstallerScript() => '''
+set -Eeuo pipefail
+PREFIX=/data/data/com.termux/files/usr
+HOME=/data/data/com.termux/files/home
+export PREFIX HOME
+
+pkg update -y
+pkg install -y x11-repo git wget curl unzip openjdk-21 aapt2 android-tools cmake ninja clang
+pkg update -y
+
+mkdir -p "\$HOME/.nexus"
+PKG="\$HOME/.nexus/flutter_${flutterVersion}_aarch64.deb"
+
+wget -O "\$PKG" "$flutterPackageUrl"
+echo "$flutterPackageSha256  \$PKG" | sha256sum -c -
+
+dpkg -i "\$PKG" || apt --fix-broken install -y
+bash "\$PREFIX/share/flutter/post_install.sh"
+source "\$PREFIX/etc/profile.d/flutter.sh"
+
+flutter --version
+dart --version
+command -v java
+command -v aapt2
+flutter doctor -v || true
+echo "NEXUS_INSTALL_OK"
+''';
 
   String _callbackFunctions(_PhoneRunnerSession session) => '''
 NEXUS_BASE="http://127.0.0.1:${session.port}/nexus/${session.id}"
