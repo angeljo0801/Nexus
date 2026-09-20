@@ -55,9 +55,6 @@ class LocalCodingAgent {
     var snapshotCreated = false;
     String? snapshotPath;
     var protocolFailures = 0;
-    final startedAt = DateTime.now();
-    const maxSteps = 6;
-    const maxAgentTime = Duration(minutes: 8);
 
     final recent =
         history.length > 12 ? history.sublist(history.length - 12) : history;
@@ -85,19 +82,7 @@ class LocalCodingAgent {
       ),
     ];
 
-    for (var step = 0; step < maxSteps; step++) {
-      if (DateTime.now().difference(startedAt) >= maxAgentTime) {
-        onStatus?.call('Time limit reached. Keeping verified changes…');
-        return CodingAgentResult(
-          response: _verifiedResponse(
-            'Nexus stopped the planning loop at its 8-minute safety limit. '
-            'Verified file changes were kept and can be build-checked now.',
-            verifiedChangedPaths,
-          ),
-          actions: actions,
-          snapshotPath: snapshotPath,
-        );
-      }
+    for (var step = 0; step < 10; step++) {
       onStatus?.call(
         step == 0
             ? 'Analyzing the request and project…'
@@ -106,9 +91,8 @@ class LocalCodingAgent {
 
       final output = await LocalLlamaRuntime.instance.generateMessages(
         messages: messages,
-        maxTokens: verifiedChangedPaths.isEmpty ? 1300 : 900,
+        maxTokens: 1600,
         temperature: 0.16,
-        timeout: const Duration(minutes: 5),
       );
 
       final toolMatch = _toolBlockPattern.firstMatch(output);
@@ -236,8 +220,8 @@ class LocalCodingAgent {
               ? '[NEXUS TOOL RESULT]\n'
                   'tool=$name\n'
                   '${result.text}\n'
-                  'Continue only if another concrete file/tool action is '
-                  'required. Otherwise return <final>summary</final>.'
+                  'Continue. Use another tool if needed. '
+                  'When the task is complete, respond with <final>summary</final>.'
               : '[NEXUS TOOL FAILURE]\n'
                   'tool=$name\n'
                   '${result.text}\n'
@@ -246,61 +230,17 @@ class LocalCodingAgent {
                   'changed until a tool result confirms success.',
         ),
       );
-
-      if (result.success &&
-          result.changedWorkspace &&
-          _readyForBuildHandoff(
-            framework: framework,
-            verifiedChangedPaths: verifiedChangedPaths,
-            completedStep: step,
-          )) {
-        onStatus?.call('Files are ready. Moving to build verification…');
-        return CodingAgentResult(
-          response: _verifiedResponse(
-            'Nexus completed the coding phase and is handing the project to '
-            'the configured build/check pipeline.',
-            verifiedChangedPaths,
-          ),
-          actions: actions,
-          snapshotPath: snapshotPath,
-        );
-      }
     }
 
     return CodingAgentResult(
       response: _verifiedResponse(
-        'I reached the $maxSteps-step safety limit for this agent run. '
+        'I reached the 10-step safety limit for this agent run. '
         'The verified changes already made remain in the project workspace.',
         verifiedChangedPaths,
       ),
       actions: actions,
       snapshotPath: snapshotPath,
     );
-  }
-
-  bool _readyForBuildHandoff({
-    required String framework,
-    required List<String> verifiedChangedPaths,
-    required int completedStep,
-  }) {
-    if (verifiedChangedPaths.isEmpty) return false;
-
-    final normalized = verifiedChangedPaths
-        .map((path) => path.replaceAll('\\', '/').toLowerCase())
-        .toSet();
-
-    if (framework.trim().toLowerCase() == 'flutter') {
-      final hasEntryPoint = normalized.contains('lib/main.dart');
-      if (hasEntryPoint && normalized.length >= 2) {
-        return true;
-      }
-
-      if (hasEntryPoint && completedStep >= 3) {
-        return true;
-      }
-    }
-
-    return normalized.length >= 3;
   }
 
   String _verifiedResponse(
@@ -505,9 +445,6 @@ Rules:
 - Do not pretend a build or test ran until Nexus supplies an actual result.
 - If a task requires unavailable execution, finish the code changes you can
   safely make and clearly state what still needs verification.
-- Stop planning once the concrete requested files have been written. Nexus
-  has a separate build/Auto-Fix stage for verification; do not keep exploring
-  after the implementation is already complete.
 - When finished, return:
 <final>A concise explanation of what you changed, which files matter, and
 anything still needing build/test verification.</final>
