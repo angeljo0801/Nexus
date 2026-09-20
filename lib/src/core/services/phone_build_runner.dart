@@ -67,6 +67,11 @@ class PhoneBuildRunner {
   static const flutterPackageUrl =
       'https://github.com/ImL1s/termux-flutter-wsl/releases/download/'
       'v3.44.9-termux-1/flutter_3.44.9-1_aarch64.deb';
+  static const flutterFallbackPackageUrl =
+      'https://github.com/ImL1s/termux-flutter-wsl/releases/download/'
+      'v3.44.9-termux/flutter_3.44.9_aarch64.deb';
+  static const flutterFallbackPackageSha256 =
+      '8b32041a11452b8d995ba45dcc2bb196e4d841410c46871853a6f4c24acddd20';
 
   final ProjectWorkspaceService _workspace = ProjectWorkspaceService.instance;
 
@@ -618,8 +623,22 @@ pkg update -y
 mkdir -p "\$HOME/.nexus"
 PKG="\$HOME/.nexus/flutter_${flutterVersion}_aarch64.deb"
 
-wget -O "\$PKG" "$flutterPackageUrl"
-echo "$flutterPackageSha256  \$PKG" | sha256sum -c -
+PRIMARY_URL="$flutterPackageUrl"
+FALLBACK_URL="$flutterFallbackPackageUrl"
+PRIMARY_SHA="$flutterPackageSha256"
+FALLBACK_SHA="$flutterFallbackPackageSha256"
+
+echo "Downloading Flutter $flutterVersion ARM64..."
+if wget --server-response --tries=2 -O "\$PKG" "\$PRIMARY_URL"; then
+  echo "\$PRIMARY_SHA  \$PKG" | sha256sum -c -
+  echo "NEXUS_FLUTTER_SOURCE=revision-1"
+else
+  echo "Primary Flutter package is unavailable; trying the stable 3.44.9 release..."
+  rm -f "\$PKG"
+  wget --server-response --tries=2 -O "\$PKG" "\$FALLBACK_URL"
+  echo "\$FALLBACK_SHA  \$PKG" | sha256sum -c -
+  echo "NEXUS_FLUTTER_SOURCE=stable-fallback"
+fi
 
 dpkg -i "\$PKG" || apt --fix-broken install -y
 bash "\$PREFIX/share/flutter/post_install.sh"
