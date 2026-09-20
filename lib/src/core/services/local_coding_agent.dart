@@ -51,6 +51,7 @@ class LocalCodingAgent {
 
     final workspaceSummary = await _workspace.summary(projectId);
     final actions = <String>[];
+    final verifiedChangedPaths = <String>[];
     var snapshotCreated = false;
     String? snapshotPath;
     var protocolFailures = 0;
@@ -100,9 +101,12 @@ class LocalCodingAgent {
         if (finalMatch != null) {
           final response = (finalMatch.group(1) ?? '').trim();
           return CodingAgentResult(
-            response: response.isEmpty
-                ? 'I completed the available project work.'
-                : response,
+            response: _verifiedResponse(
+              response.isEmpty
+                  ? 'I completed the available project work.'
+                  : response,
+              verifiedChangedPaths,
+            ),
             actions: actions,
             snapshotPath: snapshotPath,
           );
@@ -129,9 +133,12 @@ class LocalCodingAgent {
 
         final response = output.trim();
         return CodingAgentResult(
-          response: response.isEmpty
-              ? 'I completed the available project work.'
-              : response,
+          response: _verifiedResponse(
+            response.isEmpty
+                ? 'I completed the available project work.'
+                : response,
+            verifiedChangedPaths,
+          ),
           actions: actions,
           snapshotPath: snapshotPath,
         );
@@ -193,31 +200,63 @@ class LocalCodingAgent {
         arguments: arguments,
       );
 
-      actions.add(name);
+      if (result.success) {
+        actions.add(name);
+        if (result.changedWorkspace) {
+          final path = arguments['path']?.toString().trim() ?? '';
+          if (path.isNotEmpty && !verifiedChangedPaths.contains(path)) {
+            verifiedChangedPaths.add(path);
+          }
+        }
+      }
+
       messages.add(
         llama.ChatMessage(role: 'assistant', content: output),
       );
       messages.add(
         llama.ChatMessage(
           role: 'user',
-          content:
-              '[NEXUS TOOL RESULT]\n'
-              'tool=$name\n'
-              '${result.text}\n'
-              'Continue. Use another tool if needed. '
-              'When the task is complete, respond with <final>summary</final>.',
+          content: result.success
+              ? '[NEXUS TOOL RESULT]\n'
+                  'tool=$name\n'
+                  '${result.text}\n'
+                  'Continue. Use another tool if needed. '
+                  'When the task is complete, respond with <final>summary</final>.'
+              : '[NEXUS TOOL FAILURE]\n'
+                  'tool=$name\n'
+                  '${result.text}\n'
+                  'The requested action was NOT completed. Correct the tool '
+                  'arguments and retry. Do not claim this file was created or '
+                  'changed until a tool result confirms success.',
         ),
+      );
       );
     }
 
     return CodingAgentResult(
-      response:
-          'I reached the 10-step safety limit for this agent run. '
-          'The changes already made remain in the project workspace. '
-          'Ask me to continue and I will inspect the current state first.',
+      response: _verifiedResponse(
+        'I reached the 10-step safety limit for this agent run. '
+        'The verified changes already made remain in the project workspace.',
+        verifiedChangedPaths,
+      ),
       actions: actions,
       snapshotPath: snapshotPath,
     );
+  }
+
+  String _verifiedResponse(
+    String modelSummary,
+    List<String> verifiedChangedPaths,
+  ) {
+    if (verifiedChangedPaths.isEmpty) {
+      return modelSummary;
+    }
+
+    final files = verifiedChangedPaths.map((path) => '- $path').join('\n');
+    return 'Nexus completed verified file changes.\n\n'
+        'Verified files:\n$files\n\n'
+        'The list above comes from successful write operations that Nexus '
+        're-read from storage. Build/test status is reported separately.';
   }
 
   Map<String, dynamic> _parseToolRequest(RegExpMatch match) {
@@ -379,6 +418,8 @@ IMPORTANT:
 - Output exactly one tool call with no explanation before or after it.
 - If a tool request formatting attempt fails, retry the intended tool call
   directly. Never answer the user with a JSON parsing error.
+- Never claim a file was created or changed after a failed tool result.
+- Nexus independently verifies successful file writes before reporting them.
 
 Available tools:
 1. workspace_summary {}
