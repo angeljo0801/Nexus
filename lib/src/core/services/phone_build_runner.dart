@@ -555,9 +555,9 @@ for tool in bash java aapt2 flutter dart git curl unzip cmake ninja clang; do
   fi
 done
 
-if [ "${#missing[@]}" -gt 0 ]; then
+if [ "\${#missing[@]}" -gt 0 ]; then
   joined=""
-  for tool in "${missing[@]}"; do
+  for tool in "\${missing[@]}"; do
     if [ -z "\$joined" ]; then
       joined="\$tool"
     else
