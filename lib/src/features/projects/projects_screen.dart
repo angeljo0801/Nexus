@@ -47,6 +47,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
     final projectName = _name.text.trim();
     if (projectName.isEmpty) return;
 
+    FocusManager.instance.primaryFocus?.unfocus();
     Navigator.of(context).pop(
       _ProjectDraft(
         name: projectName,
@@ -109,7 +110,10 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () {
+            FocusManager.instance.primaryFocus?.unfocus();
+            Navigator.of(context).pop();
+          },
           child: const Text('Cancel'),
         ),
         FilledButton(
