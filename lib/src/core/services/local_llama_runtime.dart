@@ -27,6 +27,13 @@ class LocalLlamaRuntime {
 
   static final LocalLlamaRuntime instance = LocalLlamaRuntime._();
 
+  static const int _contextSize = 4096;
+  // Character budgets are intentionally conservative because source code
+  // tokenizes more densely than ordinary prose. This leaves room for the
+  // model's generated tool call inside the 4096-token context.
+  static const int _normalPromptCharBudget = 7200;
+  static const int _recoveryPromptCharBudget = 4600;
+
   llama.LlamaController _controller = llama.LlamaController();
   String? _loadedModelKey;
   bool _loadedFromExternal = false;
@@ -133,7 +140,7 @@ class LocalLlamaRuntime {
         await _controller.loadModel(
           modelPath: resolved.path,
           threads: threads,
-          contextSize: 4096,
+          contextSize: _contextSize,
           gpuLayers: gpuLayers,
         );
       } catch (_) {
@@ -145,7 +152,7 @@ class LocalLlamaRuntime {
         await _controller.loadModel(
           modelPath: resolved.path,
           threads: threads,
-          contextSize: 4096,
+          contextSize: _contextSize,
           gpuLayers: 0,
         );
       }
@@ -212,57 +219,189 @@ class LocalLlamaRuntime {
       final resolved = await _ensureLoaded();
       final chosenTemplate = template ?? resolved.template;
 
-      await _controller.clearContext();
-      final buffer = StringBuffer();
+      Future<String> runAttempt(
+        List<llama.ChatMessage> attemptMessages,
+      ) async {
+        await _controller.clearContext();
+        final buffer = StringBuffer();
 
-      Stream<String> startStream() {
-        return chosenTemplate == null || chosenTemplate.isEmpty
-            ? _controller.generateChat(
-                messages: messages,
-                maxTokens: maxTokens,
-                temperature: temperature,
-                topP: 0.9,
-                topK: 40,
-                repeatPenalty: 1.08,
-              )
-            : _controller.generateChat(
-                messages: messages,
-                template: chosenTemplate,
-                maxTokens: maxTokens,
-                temperature: temperature,
-                topP: 0.9,
-                topK: 40,
-                repeatPenalty: 1.08,
-              );
+        Stream<String> startStream() {
+          return chosenTemplate == null || chosenTemplate.isEmpty
+              ? _controller.generateChat(
+                  messages: attemptMessages,
+                  maxTokens: maxTokens,
+                  temperature: temperature,
+                  topP: 0.9,
+                  topK: 40,
+                  repeatPenalty: 1.08,
+                )
+              : _controller.generateChat(
+                  messages: attemptMessages,
+                  template: chosenTemplate,
+                  maxTokens: maxTokens,
+                  temperature: temperature,
+                  topP: 0.9,
+                  topK: 40,
+                  repeatPenalty: 1.08,
+                );
+        }
+
+        Stream<String> stream;
+        try {
+          stream = startStream();
+        } catch (error) {
+          if (!_isAlreadyGenerating(error)) rethrow;
+          await _recoverStaleGeneration();
+          stream = startStream();
+        }
+
+        try {
+          await for (final token in stream) {
+            buffer.write(token);
+          }
+        } catch (error) {
+          if (!_isAlreadyGenerating(error)) rethrow;
+          await _recoverStaleGeneration();
+          buffer.clear();
+          await for (final token in startStream()) {
+            buffer.write(token);
+          }
+        }
+
+        final result = buffer.toString().trim();
+        if (result.isEmpty) {
+          throw StateError('The local model returned an empty response.');
+        }
+        return result;
       }
 
-      Stream<String> stream;
-      try {
-        stream = startStream();
-      } catch (error) {
-        final message = error.toString();
-        if (!message.contains('Already generating')) rethrow;
+      final compact = _compactMessages(
+        messages,
+        maxChars: _normalPromptCharBudget,
+      );
 
-        // Recover a stale controller generation state left by an interrupted
-        // stream before attempting one clean restart.
+      try {
+        return await runAttempt(compact);
+      } catch (error) {
+        if (!_isPromptDecodeFailure(error)) rethrow;
+
+        // llama.cpp rejects prompts that no longer fit the active context.
+        // Retry once with a smaller context while preserving the system
+        // instruction and the newest tool/user turns.
         try {
           await _controller.stop();
         } catch (_) {}
-        await Future<void>.delayed(const Duration(milliseconds: 120));
-        await _controller.clearContext();
-        stream = startStream();
-      }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
 
-      await for (final token in stream) {
-        buffer.write(token);
+        final recovery = _compactMessages(
+          messages,
+          maxChars: _recoveryPromptCharBudget,
+          aggressive: true,
+        );
+        return runAttempt(recovery);
       }
-
-      final result = buffer.toString().trim();
-      if (result.isEmpty) {
-        throw StateError('The local model returned an empty response.');
-      }
-      return result;
     });
+  }
+
+  bool _isAlreadyGenerating(Object error) {
+    return error.toString().toLowerCase().contains('already generating');
+  }
+
+  bool _isPromptDecodeFailure(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('failed to decode prompt') ||
+        text.contains('decode prompt') ||
+        text.contains('prompt is too long') ||
+        text.contains('context size') ||
+        text.contains('context window');
+  }
+
+  Future<void> _recoverStaleGeneration() async {
+    try {
+      await _controller.stop();
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    await _controller.clearContext();
+  }
+
+  List<llama.ChatMessage> _compactMessages(
+    List<llama.ChatMessage> messages, {
+    required int maxChars,
+    bool aggressive = false,
+  }) {
+    if (messages.isEmpty) return messages;
+
+    final systemMessages = messages
+        .where((message) => message.role == 'system')
+        .toList(growable: false);
+    final nonSystem = messages
+        .where((message) => message.role != 'system')
+        .toList(growable: false);
+
+    final result = <llama.ChatMessage>[];
+    var used = 0;
+
+    // Keep the system contract, but cap it in the emergency retry so there is
+    // always space for the user's current request and the latest tool result.
+    for (final message in systemMessages) {
+      final content = _boundedContent(
+        message.content,
+        aggressive ? 2400 : 3600,
+      );
+      result.add(llama.ChatMessage(role: 'system', content: content));
+      used += content.length;
+    }
+
+    final remaining = <llama.ChatMessage>[];
+    for (final message in nonSystem.reversed) {
+      final perMessageCap = aggressive ? 1600 : 3000;
+      final content = _boundedContent(message.content, perMessageCap);
+      final projected = used + content.length;
+
+      if (remaining.isNotEmpty && projected > maxChars) {
+        continue;
+      }
+
+      remaining.add(
+        llama.ChatMessage(role: message.role, content: content),
+      );
+      used = projected;
+
+      if (used >= maxChars) break;
+    }
+
+    result.addAll(remaining.reversed);
+
+    // Ensure the compacted conversation never ends with an orphan assistant
+    // turn when an older user/tool result had to be discarded.
+    if (result.length > 1 &&
+        result.last.role == 'assistant' &&
+        nonSystem.isNotEmpty &&
+        nonSystem.last.role == 'user') {
+      final latest = nonSystem.last;
+      result.add(
+        llama.ChatMessage(
+          role: 'user',
+          content: _boundedContent(
+            latest.content,
+            aggressive ? 1200 : 2200,
+          ),
+        ),
+      );
+    }
+
+    return result;
+  }
+
+  String _boundedContent(String content, int maxChars) {
+    if (content.length <= maxChars) return content;
+    if (maxChars < 200) return content.substring(0, maxChars);
+
+    final head = (maxChars * 0.62).floor();
+    final tail = maxChars - head - 90;
+    return '${content.substring(0, head)}\n'
+        '[…Nexus compacted older/oversized context…]\n'
+        '${content.substring(content.length - math.max(0, tail))}';
   }
 
   Future<void> stop() => _controller.stop();
