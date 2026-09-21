@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/services/github_auth_service.dart';
+import 'backup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -284,6 +285,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        const _SectionTitle('Data protection'),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.backup_outlined),
+            title: const Text('Backups & restore'),
+            subtitle: const Text(
+              'Create, restore and configure automatic external backups.',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BackupScreen()),
+            ),
           ),
         ),
         const SizedBox(height: 18),
