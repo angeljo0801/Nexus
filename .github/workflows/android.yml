@@ -38,6 +38,19 @@ jobs:
             flutter create --platforms=android --org com.nexus.local .
           fi
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/' android/app/build.gradle.kts
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/build.gradle.kts')
+          s=p.read_text()
+          marker='getByName("release") {'
+          if marker in s and 'isMinifyEnabled = false' not in s:
+              s=s.replace(
+                  marker,
+                  marker+'\n            isMinifyEnabled = false\n            isShrinkResources = false',
+                  1,
+              )
+          p.write_text(s)
+          PY
           mkdir -p android/app/src/main/kotlin/com/nexus/local/nexus
           cp .github/NexusBackupStorageBridge.kt android/app/src/main/kotlin/com/nexus/local/nexus/NexusBackupStorageBridge.kt
           cp .github/NexusMainActivity.kt android/app/src/main/kotlin/com/nexus/local/nexus/MainActivity.kt
