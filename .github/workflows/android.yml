@@ -64,16 +64,13 @@ jobs:
           p.write_text(s)
           proguard=Path('android/app/proguard-rules.pro')
           rules=proguard.read_text() if proguard.exists() else ''
-          extra='''
-
-# JGit contains optional desktop/JVM integration paths that Android does not
-# provide. Nexus does not use JMX monitoring, SPNEGO/GSS auth, or ProcessHandle
-# based GC locking on Android.
--dontwarn java.lang.ProcessHandle
--dontwarn java.lang.management.**
--dontwarn javax.management.**
--dontwarn org.ietf.jgss.**
-'''
+          extra = (
+              "\n# JGit optional desktop/JVM paths are not used on Android.\n"
+              "-dontwarn java.lang.ProcessHandle\n"
+              "-dontwarn java.lang.management.**\n"
+              "-dontwarn javax.management.**\n"
+              "-dontwarn org.ietf.jgss.**\n"
+          )
           if '-dontwarn javax.management.**' not in rules:
               proguard.write_text(rules+extra)
           # Ensure the release variant consumes the rules even when Flutter's
