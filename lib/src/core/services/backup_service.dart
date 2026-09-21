@@ -1,7 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:archive/archive.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -154,7 +152,6 @@ class NexusBackupService {
     }
 
     final bytes = ZipEncoder().encode(archive);
-    if (bytes == null) throw Exception('Could not create Nexus backup.');
     return Uint8List.fromList(bytes);
   }
 
