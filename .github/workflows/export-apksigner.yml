@@ -1,0 +1,28 @@
+name: Export Android APK signer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-apksigner.yml'
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect apksigner
+        run: |
+          set -e
+          TOOL="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$TOOL"
+          DIR="$(dirname "$TOOL")"
+          mkdir -p signer-tool
+          cp "$TOOL" signer-tool/
+          cp -R "$DIR/lib" signer-tool/
+          echo "source=$DIR" > signer-tool/SOURCE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apksigner-tool
+          path: signer-tool
