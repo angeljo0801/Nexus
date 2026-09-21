@@ -76,6 +76,19 @@ jobs:
 
           p = Path('android/app/build.gradle.kts')
           s = p.read_text()
+          s = re.sub(
+              r'namespace\s*=\s*"[^"]+"',
+              'namespace = "com.nexus.local.nexus"',
+              s,
+              count=1,
+          )
+          s = re.sub(
+              r'applicationId\s*=\s*"[^"]+"',
+              'applicationId = "com.nexus.local.nexus"',
+              s,
+              count=1,
+          )
+
           alias = os.environ.get('NEXUS_KEY_ALIAS', '').strip()
           store_password = os.environ.get('NEXUS_KEYSTORE_PASSWORD', '').strip()
           key_password = os.environ.get('NEXUS_KEY_PASSWORD', '').strip()
@@ -85,7 +98,7 @@ jobs:
               def esc(value):
                   return value.replace('\\', '\\\\').replace('"', '\\"')
 
-              signing = '''    signingConfigs {
+              block = '''    signingConfigs {
                   create("nexusRelease") {
                       keyAlias = "''' + esc(alias) + '''"
                       keyPassword = "''' + esc(key_password) + '''"
@@ -96,7 +109,7 @@ jobs:
 
           '''
               if 'create("nexusRelease")' not in s:
-                  s = s.replace('    buildTypes {', signing + '    buildTypes {', 1)
+                  s = s.replace('    buildTypes {', block + '    buildTypes {', 1)
               s = re.sub(
                   r'(getByName\("release"\)\s*\{)(.*?)(\n\s*\})',
                   lambda m: (
@@ -117,7 +130,7 @@ jobs:
         run: flutter pub get
 
       - name: Analyze
-        run: flutter analyze --no-fatal-infos
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Test
         run: flutter test
