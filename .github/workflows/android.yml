@@ -10,6 +10,8 @@ on:
       - "test/**"
       - "pubspec.yaml"
       - "analysis_options.yaml"
+      - ".github/NexusBackupStorageBridge.kt"
+      - ".github/NexusMainActivity.kt"
       - ".github/workflows/android.yml"
 
 permissions:
@@ -36,6 +38,66 @@ jobs:
             flutter create --platforms=android --org com.nexus.local .
           fi
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/' android/app/build.gradle.kts
+          mkdir -p android/app/src/main/kotlin/com/nexus/local/nexus
+          cp .github/NexusBackupStorageBridge.kt android/app/src/main/kotlin/com/nexus/local/nexus/NexusBackupStorageBridge.kt
+          cp .github/NexusMainActivity.kt android/app/src/main/kotlin/com/nexus/local/nexus/MainActivity.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('android/app/build.gradle.kts')
+          s=p.read_text()
+          s=re.sub(r'namespace\s*=\s*"[^"]+"','namespace = "com.nexus.local.nexus"',s,count=1)
+          s=re.sub(r'applicationId\s*=\s*"[^"]+"','applicationId = "com.nexus.local.nexus"',s,count=1)
+          p.write_text(s)
+          m=Path('android/app/src/main/AndroidManifest.xml')
+          x=m.read_text()
+          root='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          if 'android.permission.WRITE_EXTERNAL_STORAGE' not in x:
+              x=x.replace(root,root+'\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />',1)
+          if 'android.permission.READ_EXTERNAL_STORAGE' not in x:
+              x=x.replace(root,root+'\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />',1)
+          m.write_text(x)
+          PY
+
+      - name: Configure stable Android signing
+        env:
+          NEXUS_KEYSTORE_B64: ${{ secrets.NEXUS_KEYSTORE_B64 }}
+          NEXUS_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_KEYSTORE_PASSWORD }}
+          NEXUS_KEY_ALIAS: ${{ secrets.NEXUS_KEY_ALIAS }}
+          NEXUS_KEY_PASSWORD: ${{ secrets.NEXUS_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          if [ -n "$NEXUS_KEYSTORE_B64" ]; then
+            printf '%s' "$NEXUS_KEYSTORE_B64" | base64 --decode > android/app/nexus-release.jks
+            python3 - <<'PY'
+            from pathlib import Path
+            import os,re
+            p=Path('android/app/build.gradle.kts');s=p.read_text()
+            alias=os.environ.get('NEXUS_KEY_ALIAS','').strip()
+            sp=os.environ.get('NEXUS_KEYSTORE_PASSWORD','').strip()
+            kp=os.environ.get('NEXUS_KEY_PASSWORD','').strip()
+            if alias and sp and kp:
+                def esc(v): return v.replace('\\','\\\\').replace('"','\\\"')
+                block='''    signingConfigs {
+                    create("nexusRelease") {
+                        keyAlias = "''' + esc(alias) + '''"
+                        keyPassword = "''' + esc(kp) + '''"
+                        storeFile = file("nexus-release.jks")
+                        storePassword = "''' + esc(sp) + '''"
+                    }
+                }
+
+            '''
+                if 'create("nexusRelease")' not in s:
+                    s=s.replace('    buildTypes {',block+'    buildTypes {',1)
+                s=re.sub(
+                    r'(getByName\("release"\)\s*\{)(.*?)(\n\s*\})',
+                    lambda m:m.group(1)+m.group(2)+'\n            signingConfig = signingConfigs.getByName("nexusRelease")'+m.group(3),
+                    s,count=1,flags=re.S
+                )
+                p.write_text(s)
+            PY
+          fi
 
       - name: Dependencies
         run: flutter pub get
@@ -46,15 +108,15 @@ jobs:
       - name: Test
         run: flutter test
 
-      - name: Build debug APK
+      - name: Build release APK
         env:
           NEXUS_GITHUB_CLIENT_ID: ${{ vars.NEXUS_GITHUB_CLIENT_ID }}
         run: >-
-          flutter build apk --debug --target-platform android-arm64
+          flutter build apk --release --target-platform android-arm64
           --dart-define=NEXUS_GITHUB_CLIENT_ID=$NEXUS_GITHUB_CLIENT_ID
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: nexus-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: Nexus-v0.1.1-Backup-Stable-ID-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
