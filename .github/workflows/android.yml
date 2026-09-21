@@ -174,10 +174,29 @@ jobs:
           NEXUS_GITHUB_CLIENT_ID: ${{ vars.NEXUS_GITHUB_CLIENT_ID }}
         run: >-
           flutter build apk --release --target-platform android-arm64
+          --build-number "$GITHUB_RUN_NUMBER"
           --dart-define=NEXUS_GITHUB_CLIENT_ID=$NEXUS_GITHUB_CLIENT_ID
+
+      - name: Record build identity
+        env:
+          NEXUS_KEYSTORE_B64: ${{ secrets.NEXUS_KEYSTORE_B64 }}
+        shell: bash
+        run: |
+          {
+            echo "applicationId=com.nexus.local.nexus"
+            echo "buildNumber=$GITHUB_RUN_NUMBER"
+            if [ -n "$NEXUS_KEYSTORE_B64" ]; then
+              echo "signing=persistent"
+            else
+              echo "signing=temporary-debug"
+              echo "::warning::Nexus todavía no tiene la clave persistente configurada; Android puede rechazar actualizaciones entre builds."
+            fi
+          } > build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Nexus-v0.1.1-Backup-Stable-ID-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
