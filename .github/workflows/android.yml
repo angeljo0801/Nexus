@@ -31,6 +31,26 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Verify persistent signing secrets
+        env:
+          NEXUS_KEYSTORE_B64: ${{ secrets.NEXUS_KEYSTORE_B64 }}
+          NEXUS_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_KEYSTORE_PASSWORD }}
+          NEXUS_KEY_ALIAS: ${{ secrets.NEXUS_KEY_ALIAS }}
+          NEXUS_KEY_PASSWORD: ${{ secrets.NEXUS_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          missing=0
+          for name in NEXUS_KEYSTORE_B64 NEXUS_KEYSTORE_PASSWORD NEXUS_KEY_ALIAS NEXUS_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing secret $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Nexus will not publish an APK with temporary signing."
+            exit 1
+          fi
+
       - name: Ensure Android platform scaffold exists
         shell: bash
         run: |
@@ -185,12 +205,7 @@ jobs:
           {
             echo "applicationId=com.nexus.local.nexus"
             echo "buildNumber=$GITHUB_RUN_NUMBER"
-            if [ -n "$NEXUS_KEYSTORE_B64" ]; then
-              echo "signing=persistent"
-            else
-              echo "signing=temporary-debug"
-              echo "::warning::Nexus todavía no tiene la clave persistente configurada; Android puede rechazar actualizaciones entre builds."
-            fi
+            echo "signing=persistent"
           } > build/app/outputs/flutter-apk/BUILD_IDENTITY.txt
 
       - name: Upload APK
