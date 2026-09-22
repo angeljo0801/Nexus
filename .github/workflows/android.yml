@@ -210,6 +210,41 @@ jobs:
           --build-number "$GITHUB_RUN_NUMBER"
           --dart-define=NEXUS_GITHUB_CLIENT_ID=$NEXUS_GITHUB_CLIENT_ID
 
+      - name: Apply persistent APK signature
+        env:
+          NEXUS_KEYSTORE_B64: ${{ secrets.NEXUS_KEYSTORE_B64 }}
+          NEXUS_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_KEYSTORE_PASSWORD }}
+          NEXUS_KEY_ALIAS: ${{ secrets.NEXUS_KEY_ALIAS }}
+          NEXUS_KEY_PASSWORD: ${{ secrets.NEXUS_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          normalize_secret() {
+            local name="$1"
+            local raw="$2"
+            if printf '%s' "$raw" | grep -q "$name="; then
+              printf '%s\n' "$raw" | sed -n "s/^.*${name}[[:space:]]*=[[:space:]]*//p" | head -n 1 | tr -d '\r'
+            else
+              printf '%s' "$raw" | tr -d '\r'
+            fi
+          }
+          KEYSTORE_B64="$(normalize_secret NEXUS_KEYSTORE_B64 "$NEXUS_KEYSTORE_B64" | tr -cd 'A-Za-z0-9+/=')"
+          STORE_PASSWORD="$(normalize_secret NEXUS_KEYSTORE_PASSWORD "$NEXUS_KEYSTORE_PASSWORD")"
+          KEY_ALIAS="$(normalize_secret NEXUS_KEY_ALIAS "$NEXUS_KEY_ALIAS")"
+          KEY_PASSWORD="$(normalize_secret NEXUS_KEY_PASSWORD "$NEXUS_KEY_PASSWORD")"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > android/app/nexus-release.jks
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$APKSIGNER"
+          "$APKSIGNER" sign \
+            --ks android/app/nexus-release.jks \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$STORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
+            --out build/app/outputs/flutter-apk/app-release-stable.apk \
+            build/app/outputs/flutter-apk/app-release.apk
+          mv build/app/outputs/flutter-apk/app-release-stable.apk build/app/outputs/flutter-apk/app-release.apk
+          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/app-release.apk
+          rm -f android/app/nexus-release.jks
+
       - name: Record build identity
         env:
           NEXUS_KEYSTORE_B64: ${{ secrets.NEXUS_KEYSTORE_B64 }}
