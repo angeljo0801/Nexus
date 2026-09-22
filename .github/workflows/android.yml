@@ -121,6 +121,19 @@ jobs:
           NEXUS_KEY_PASSWORD: ${{ secrets.NEXUS_KEY_PASSWORD }}
         shell: bash
         run: |
+          normalize_secret() {
+            local name="$1"
+            local raw="$2"
+            if printf '%s' "$raw" | grep -q "$name="; then
+              printf '%s\n' "$raw" | sed -n "s/^.*${name}[[:space:]]*=[[:space:]]*//p" | head -n 1 | tr -d '\r'
+            else
+              printf '%s' "$raw" | tr -d '\r'
+            fi
+          }
+          export NEXUS_KEYSTORE_B64="$(normalize_secret NEXUS_KEYSTORE_B64 "$NEXUS_KEYSTORE_B64" | tr -cd 'A-Za-z0-9+/=')"
+          export NEXUS_KEYSTORE_PASSWORD="$(normalize_secret NEXUS_KEYSTORE_PASSWORD "$NEXUS_KEYSTORE_PASSWORD")"
+          export NEXUS_KEY_ALIAS="$(normalize_secret NEXUS_KEY_ALIAS "$NEXUS_KEY_ALIAS")"
+          export NEXUS_KEY_PASSWORD="$(normalize_secret NEXUS_KEY_PASSWORD "$NEXUS_KEY_PASSWORD")"
           if [ -n "$NEXUS_KEYSTORE_B64" ]; then
             printf '%s' "$NEXUS_KEYSTORE_B64" | base64 --decode > android/app/nexus-release.jks
           fi
