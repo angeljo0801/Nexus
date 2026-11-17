@@ -27,6 +27,7 @@ jobs:
         with:
           packages: 'platforms;android-35 build-tools;35.0.0'
       - run: node --check app/src/main/assets/sync.js
+      - run: node -e "const fs=require('fs'),vm=require('vm');const s=fs.readFileSync('app/src/main/assets/index.html','utf8');for(const m of s.matchAll(/<script>([\\s\\S]*?)<\\/script>/g))new vm.Script(m[1]);"
       - run: node tools/test_model.js
       - run: gradle :app:assembleDebug
       - name: Sign Origen APK with persistent repository certificate

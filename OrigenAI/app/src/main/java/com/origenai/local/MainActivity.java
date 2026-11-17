@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
         web.getSettings().setJavaScriptEnabled(true); web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setAllowFileAccess(false); web.getSettings().setAllowContentAccess(false);
         web.getSettings().setBlockNetworkLoads(true);
+        web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient(){
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {return !req.getUrl().toString().equals("file:///android_asset/index.html");}
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {return !url.equals("file:///android_asset/index.html");}
@@ -71,6 +72,7 @@ public class MainActivity extends Activity {
         FileOutputStream stream=null;try{stream=file.startWrite();stream.write(bytes);file.finishWrite(stream);}catch(IOException e){if(stream!=null)file.failWrite(stream);throw e;}
     }
     private class ModelStore {
+        @JavascriptInterface public void keepAwake(boolean enabled){runOnUiThread(()->{if(enabled)getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);});}
         @JavascriptInterface public String read(){synchronized(checkpointLock){try{return readModel(checkpoint(false));}catch(Exception e){return "!ERROR";}}}
         @JavascriptInterface public boolean write(String json){synchronized(checkpointLock){try{writeModel(checkpoint(false),json);return true;}catch(Exception e){return false;}}}
         @JavascriptInterface public boolean archive(String json){synchronized(checkpointLock){try{writeModel(checkpoint(true),json);return true;}catch(Exception e){return false;}}}
