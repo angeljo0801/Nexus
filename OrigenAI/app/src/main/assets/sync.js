@@ -1,8 +1,9 @@
 'use strict';
 (()=>{
-const bridge=window.OrigenSync, pending=new Map();let serial=0, remote=null, syncing=false, auto=false, latest=null;
+const bridge=window.OrigenSync, pending=new Map();let serial=0, remote=null, syncing=false, auto=false, latest=null, pauseRequested=false;
 window.origenSyncReply=(id,json)=>{const cb=pending.get(id);if(cb){pending.delete(id);cb(JSON.parse(json));}};
 function call(op,a='',b=''){return new Promise((resolve,reject)=>{if(!bridge)return reject(Error('Disponible solo en Android.'));const id=String(++serial);pending.set(id,r=>r.ok?resolve(r):reject(Error(r.error)));bridge.request(id,op,a,b);setTimeout(()=>{if(pending.delete(id))reject(Error('Tiempo de espera agotado.'));},65000);});}
+window.origenPauseForUpgrade=()=>{pauseRequested=true;auto=false;$('syncAuto').checked=false;if(running)running=false;status(syncBusy?'Pausando y guardando el lote…':'Modo automático desactivado para migrar.');update();};
 function info(t){$('syncInfo').textContent=t;}
 function controls(){for(const id of ['syncConnect','syncDisconnect','syncPull','syncPush'])$(id).disabled=syncing||running||busy||fileBusy;$('syncApply').disabled=syncing||running||busy||fileBusy||(!remote&&!syncJob);}
 function validate(o){
@@ -19,7 +20,7 @@ const obj={version:1,updatedAt:new Date().toISOString(),state,modelSteps:model.s
 await call('push',JSON.stringify(obj,null,2));}
 async function pull(){if(syncing||running||busy||fileBusy)return;syncing=true;controls();try{const r=await call('pull');if(r.payload){const x=validate(JSON.parse(r.payload));remote=syncApplied.includes(x.id)?null:x;}else remote=null;info('Conexión correcta.');}catch(e){info(e.message);}finally{syncing=false;preview();}if(auto&&!document.hidden&&(remote||syncJob))await apply();}
 async function apply(){
-if(syncing||running||busy||fileBusy||document.hidden||(!remote&&!syncJob))return;syncing=true;syncBusy=true;update();controls();
+if(syncing||running||busy||fileBusy||document.hidden||(!remote&&!syncJob))return;pauseRequested=false;syncing=true;syncBusy=true;update();controls();
 try{
 if(storageLocked)throw Error('Recupera el respaldo antes de entrenar');
 if(!syncJob){
@@ -29,11 +30,11 @@ syncJob={id:x.id,repo:bridge.repository(),target:model.step+x.steps,lr:x.lr,test
 remote=null;update();renderData();
 }
 const job=syncJob;if(job.repo&&job.repo!==bridge.repository())throw Error('Conecta el repositorio original del lote activo.');info('Entrenamiento remoto: '+job.id);try{await push('training',{targetSteps:job.target});}catch(e){info('Lote local guardado; no se pudo enviar estado inicial.');}
-let remain=Math.max(0,job.target-model.step);
-if(remain){tab('train');await train({steps:remain,lr:job.lr,progress:async()=>{try{await push('training',{targetSteps:job.target});}catch(e){info('Entrenando localmente; estado remoto no actualizado.');}}});}
-if(model.step<job.target||document.hidden||!storageOK){await push('paused',{targetSteps:job.target});info('Pausado. Abre la aplicación para continuar.');return;}
-let results=[];if(job.tests.length){setBusy(true);try{for(const q of job.tests){if(document.hidden)break;results.push({q,a:await generate(q,40,0)});}}finally{setBusy(false);}}
-if(results.length!==job.tests.length){await push('paused');return;}
+let remain=Math.max(0,job.target-model.step),trainResult=null;
+if(remain&&!pauseRequested){tab('train');trainResult=await train({steps:remain,lr:job.lr,progress:async()=>{try{await push('training',{targetSteps:job.target});}catch(e){info('Entrenando localmente; estado remoto no actualizado.');}}});}
+if(pauseRequested||model.step<job.target||document.hidden||!storageOK){const error=trainResult?.error;if(error){auto=false;$('syncAuto').checked=false;}await push('paused',{targetSteps:job.target,...(error?{error:String(error).slice(0,300)}:{})});info(error?'Error de entrenamiento: '+error:'Pausado. Puedes activar las tres capas o continuar el lote.');return;}
+let results=[];if(job.tests.length){setBusy(true);try{for(const q of job.tests){if(document.hidden||pauseRequested)break;results.push({q,a:await generate(q,40,0)});}}finally{setBusy(false);}}
+if(pauseRequested||results.length!==job.tests.length){await push('paused',{targetSteps:job.target});return;}
 let evaluation=null;try{evaluation=evaluateReference();}catch(e){}latest={id:job.id,results,evaluation};await push('completed',{jobId:job.id,results,evaluation});syncJob=null;if(!save())throw Error('No se pudo guardar el cierre del lote');info('Lote completado y resultados enviados.');
 }catch(e){info(e.message);}finally{syncing=false;syncBusy=false;update();preview();}
 }
@@ -41,7 +42,7 @@ $('syncConnect').onclick=async()=>{if(syncing||running||busy||fileBusy)return;sy
 $('syncDisconnect').onclick=async()=>{if(syncing||running||busy||fileBusy)return;syncing=true;controls();try{await call('clear');auto=false;$('syncAuto').checked=false;$('syncRepo').value='';remote=null;latest=null;info('Desconectado. El modelo permanece en el teléfono.');}catch(e){info(e.message);}finally{syncing=false;preview();}};
 $('syncPull').onclick=pull;$('syncApply').onclick=apply;
 $('syncPush').onclick=async()=>{if(syncing||running||busy||fileBusy)return;syncing=true;controls();try{if(!syncJob&&!latest)throw Error('No hay sesión nueva que informar; se conserva el último resultado remoto.');await push(syncJob?'paused':'completed',syncJob?{targetSteps:syncJob.target}:latest?{jobId:latest.id,results:latest.results,evaluation:latest.evaluation}:{});info('Estado enviado.');}catch(e){info(e.message);}finally{syncing=false;controls();}};
-$('syncAuto').onchange=()=>{auto=$('syncAuto').checked;if(auto)pull();};
+$('syncAuto').onchange=()=>{auto=$('syncAuto').checked;if(auto){pauseRequested=false;pull();}};
 if(bridge){$('syncRepo').value=bridge.repository();info($('syncRepo').value?'Conexión guardada.':'Configura un repositorio privado.');}else info('Disponible en Android.');
 setInterval(()=>{controls();if(auto&&!document.hidden&&!running&&!busy&&!syncing&&!fileBusy)pull();},60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&auto)pull();});
