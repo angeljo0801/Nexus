@@ -1,0 +1,65 @@
+name: Build Origen AI
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'OrigenAI/**'
+      - '.github/workflows/origen-ai.yml'
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: OrigenAI
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - run: node tools/test_model.js
+      - run: gradle :app:assembleDebug
+      - name: Sign Origen APK with persistent repository certificate
+        env:
+          NEXUS_KEYSTORE_B64: ${{ secrets.NEXUS_KEYSTORE_B64 }}
+          NEXUS_KEYSTORE_PASSWORD: ${{ secrets.NEXUS_KEYSTORE_PASSWORD }}
+          NEXUS_KEY_ALIAS: ${{ secrets.NEXUS_KEY_ALIAS }}
+          NEXUS_KEY_PASSWORD: ${{ secrets.NEXUS_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          normalize() {
+            local name="$1" raw="$2"
+            if printf '%s' "$raw" | grep -q "$name="; then
+              printf '%s\n' "$raw" | sed -n "s/^.*${name}[[:space:]]*=[[:space:]]*//p" | head -n 1 | tr -d '\r'
+            else
+              printf '%s' "$raw" | tr -d '\r'
+            fi
+          }
+          for name in NEXUS_KEYSTORE_B64 NEXUS_KEYSTORE_PASSWORD NEXUS_KEY_ALIAS NEXUS_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing signing secret $name"
+              exit 1
+            fi
+          done
+          export STORE_PASS="$(normalize NEXUS_KEYSTORE_PASSWORD "$NEXUS_KEYSTORE_PASSWORD")"
+          export KEY_PASS="$(normalize NEXUS_KEY_PASSWORD "$NEXUS_KEY_PASSWORD")"
+          ALIAS="$(normalize NEXUS_KEY_ALIAS "$NEXUS_KEY_ALIAS")"
+          KEYSTORE="$(mktemp)"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          normalize NEXUS_KEYSTORE_B64 "$NEXUS_KEYSTORE_B64" | tr -cd 'A-Za-z0-9+/=' | base64 --decode > "$KEYSTORE"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          mkdir -p dist
+          "$APKSIGNER" sign --ks "$KEYSTORE" --ks-key-alias "$ALIAS" --ks-pass env:STORE_PASS --key-pass env:KEY_PASS --out dist/OrigenAI.apk app/build/outputs/apk/debug/app-debug.apk
+          "$APKSIGNER" verify --verbose dist/OrigenAI.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OrigenAI-APK
+          path: OrigenAI/dist/OrigenAI.apk
