@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
+import android.util.AtomicFile;
+import android.content.Intent;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
@@ -52,7 +54,47 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {return !url.equals("file:///android_asset/index.html");}
         });
         web.addJavascriptInterface(new SyncBridge(),"OrigenSync");
+        web.addJavascriptInterface(new ModelStore(),"OrigenStore");
         setContentView(web); web.loadUrl("file:///android_asset/index.html");
+    }
+    private static final int MAX_MODEL_BYTES=96*1024*1024;
+    private static final int EXPORT_MODEL=713, IMPORT_MODEL=714;
+    private final Object checkpointLock=new Object();
+    private AtomicFile checkpoint(boolean backup){return new AtomicFile(new File(getFilesDir(),backup?"origen-before-expand.json":"origen-checkpoint.json"));}
+    private String readModel(AtomicFile file) throws IOException {
+        if(!file.getBaseFile().exists()&&!new File(file.getBaseFile().getPath()+".bak").exists())return "";
+        byte[] bytes=file.readFully();if(bytes.length>MAX_MODEL_BYTES)throw new IOException("Model too large");
+        return new String(bytes,StandardCharsets.UTF_8);
+    }
+    private void writeModel(AtomicFile file,String json) throws IOException {
+        byte[] bytes=json.getBytes(StandardCharsets.UTF_8);if(bytes.length==0||bytes.length>MAX_MODEL_BYTES)throw new IOException("Model too large");
+        FileOutputStream stream=null;try{stream=file.startWrite();stream.write(bytes);file.finishWrite(stream);}catch(IOException e){if(stream!=null)file.failWrite(stream);throw e;}
+    }
+    private class ModelStore {
+        @JavascriptInterface public String read(){synchronized(checkpointLock){try{return readModel(checkpoint(false));}catch(Exception e){return "!ERROR";}}}
+        @JavascriptInterface public boolean write(String json){synchronized(checkpointLock){try{writeModel(checkpoint(false),json);return true;}catch(Exception e){return false;}}}
+        @JavascriptInterface public boolean archive(String json){synchronized(checkpointLock){try{writeModel(checkpoint(true),json);return true;}catch(Exception e){return false;}}}
+        @JavascriptInterface public String imported(){synchronized(checkpointLock){try{return readModel(new AtomicFile(new File(getFilesDir(),"origen-import.json")));}catch(Exception e){return "!ERROR";}}}
+        @JavascriptInterface public String archived(){synchronized(checkpointLock){try{return readModel(checkpoint(true));}catch(Exception e){return "!ERROR";}}}
+        @JavascriptInterface public void exportFile(){runOnUiThread(()->{Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/json");i.addCategory(Intent.CATEGORY_OPENABLE);i.putExtra(Intent.EXTRA_TITLE,"OrigenAI-backup.json");try{startActivityForResult(i,EXPORT_MODEL);}catch(Exception e){modelNotice("No se pudo abrir el selector de archivos.");}});}
+        @JavascriptInterface public void importFile(){runOnUiThread(()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("application/json");i.addCategory(Intent.CATEGORY_OPENABLE);try{startActivityForResult(i,IMPORT_MODEL);}catch(Exception e){modelNotice("No se pudo abrir el selector de archivos.");}});}
+    }
+    private void modelNotice(String text){runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenFileNotice("+JSONObject.quote(text)+")",null);});}
+    @Override protected void onActivityResult(int request,int result,Intent intent){
+        super.onActivityResult(request,result,intent);
+        if(request!=EXPORT_MODEL&&request!=IMPORT_MODEL)return;
+        if(result!=RESULT_OK||intent==null||intent.getData()==null){modelNotice("Operación cancelada.");return;}
+        Uri uri=intent.getData();
+        io.execute(()->{try{
+            if(request==EXPORT_MODEL){synchronized(checkpointLock){String value=readModel(checkpoint(false));if(value.isEmpty())throw new IOException();try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException();out.write(value.getBytes(StandardCharsets.UTF_8));}}modelNotice("Respaldo exportado.");}
+            else{
+                ByteArrayOutputStream out=new ByteArrayOutputStream();try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException();byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1){if(out.size()+n>MAX_MODEL_BYTES)throw new IOException();out.write(buf,0,n);}}
+                String value=new String(out.toByteArray(),StandardCharsets.UTF_8);
+                // Avoid injecting huge JSON into JS source. Save to a private staged file and notify JS.
+                synchronized(checkpointLock){writeModel(new AtomicFile(new File(getFilesDir(),"origen-import.json")),value);}
+                runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenImportReady()",null);});
+            }
+        }catch(Exception e){modelNotice("No se pudo procesar el archivo.");}});
     }
     private static class Response { int code; String body; Response(int c,String b){code=c;body=b;} }
     private Response http(String repo,String tok,String suffix,String method,String body) throws Exception {
@@ -109,5 +151,5 @@ public class MainActivity extends Activity {
             });
         }
     }
-    @Override protected void onDestroy(){io.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.destroy();web=null;}super.onDestroy();}
+    @Override protected void onDestroy(){io.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
 }

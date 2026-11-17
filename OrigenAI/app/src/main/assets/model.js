@@ -13,7 +13,7 @@ const zeros=n=>new Float32Array(n);
 function rng(seed){let x=seed>>>0||123;return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return (x>>>0)/4294967296;};}
 function soft(a){let m=-Infinity;for(let x of a)m=Math.max(m,x);let z=0;for(let i=0;i<a.length;i++){a[i]=Math.exp(a[i]-m);z+=a[i];}for(let i=0;i<a.length;i++)a[i]/=z;return a;}
 class Transformer {
- constructor({d=48,ctx=64,seed=12345}={}){this.d=d;this.ctx=ctx;this.f=d*2;this.r=rng(seed);this.step=0;this.loss=null;this.p={};this.m={};this.v={};this.shapes={E:[V,d],P:[ctx,d],Q:[d,d],K:[d,d],U:[d,d],O:[d,d],A:[d,this.f],B:[this.f,d],W:[d,V],b:[1,V]};for(const [k,[a,b]] of Object.entries(this.shapes)){let p=this.p[k]=zeros(a*b);this.m[k]=zeros(p.length);this.v[k]=zeros(p.length);let scale=k==='b'?0:Math.sqrt(6/(a+b));if(k==='E'||k==='P')scale=.12;for(let j=0;j<p.length;j++)p[j]=(this.r()*2-1)*scale;}}
+ constructor({d=48,ctx=64,seed=12345}={}){this.d=d;this.ctx=ctx;this.f=d*2;this.r=rng(seed);this.step=0;this.optStep=0;this.loss=null;this.p={};this.m={};this.v={};this.shapes={E:[V,d],P:[ctx,d],Q:[d,d],K:[d,d],U:[d,d],O:[d,d],A:[d,this.f],B:[this.f,d],W:[d,V],b:[1,V]};for(const [k,[a,b]] of Object.entries(this.shapes)){let p=this.p[k]=zeros(a*b);this.m[k]=zeros(p.length);this.v[k]=zeros(p.length);let scale=k==='b'?0:Math.sqrt(6/(a+b));if(k==='E'||k==='P')scale=.12;for(let j=0;j<p.length;j++)p[j]=(this.r()*2-1)*scale;}}
  count(){return Object.values(this.p).reduce((a,b)=>a+b.length,0);}
  // y = x W, row-major
  mm(x,w,n,a,b){let y=zeros(n*b);for(let i=0;i<n;i++)for(let j=0;j<a;j++){let q=x[i*a+j],off=j*b;for(let k=0;k<b;k++)y[i*b+k]+=q*w[off+k];}return y;}
@@ -23,11 +23,29 @@ class Transformer {
  train(ids,targets,lr=.003){let s=this.forward(ids),{n,d,f,x,q,k,u,att,c,h,z,y,logits}=s,p=this.p,g={};for(let key in p)g[key]=zeros(p[key].length);let dl=zeros(n*V),loss=0,count=0;for(let i=0;i<n;i++)if(targets[i]>=0)count++;if(!count)return null;for(let i=0;i<n;i++){let t=targets[i];if(t<0)continue;let prob=soft(logits.slice(i*V,(i+1)*V));loss-=Math.log(Math.max(1e-12,prob[t]));for(let j=0;j<V;j++){let v=(prob[j]-(j===t?1:0))/count;dl[i*V+j]=v;g.b[j]+=v;}}
  let dy=this.back(y,p.W,dl,g.W,n,d,V),dz=this.back(z,p.B,dy,g.B,n,f,d);for(let i=0;i<dz.length;i++)dz[i]*=1-z[i]*z[i];let dh=this.back(h,p.A,dz,g.A,n,d,f);for(let i=0;i<dh.length;i++)dh[i]+=dy[i];let dc=this.back(c,p.O,dh,g.O,n,d,d),dq=zeros(n*d),dk=zeros(n*d),du=zeros(n*d),scale=1/Math.sqrt(d);for(let i=0;i<n;i++){let da=zeros(i+1),mean=0;for(let j=0;j<=i;j++){let v=0,a=att[i*n+j];for(let t=0;t<d;t++){v+=dc[i*d+t]*u[j*d+t];du[j*d+t]+=a*dc[i*d+t];}da[j]=v;mean+=v*a;}for(let j=0;j<=i;j++){let a=att[i*n+j]*(da[j]-mean)*scale;for(let t=0;t<d;t++){dq[i*d+t]+=a*k[j*d+t];dk[j*d+t]+=a*q[i*d+t];}}}
  let dxq=this.back(x,p.Q,dq,g.Q,n,d,d),dxk=this.back(x,p.K,dk,g.K,n,d,d),dxu=this.back(x,p.U,du,g.U,n,d,d);for(let i=0;i<n;i++)for(let j=0;j<d;j++){let ix=i*d+j,v=dh[ix]+dxq[ix]+dxk[ix]+dxu[ix];g.E[ids[i]*d+j]+=v;g.P[ix]+=v;}
- let norm=0;for(let a of Object.values(g))for(let v of a)norm+=v*v;let clip=Math.min(1,1/(Math.sqrt(norm)+1e-8));this.step++;let c1=1-Math.pow(.9,this.step),c2=1-Math.pow(.999,this.step);for(let key in p){let a=p[key],m=this.m[key],v=this.v[key],b=g[key];for(let i=0;i<a.length;i++){let grad=b[i]*clip;m[i]=.9*m[i]+.1*grad;v[i]=.999*v[i]+.001*grad*grad;a[i]-=lr*(m[i]/c1)/(Math.sqrt(v[i]/c2)+1e-8);}}loss/=count;this.loss=this.loss===null?loss:.96*this.loss+.04*loss;return loss;}
- sample(history,{temperature=.75,topK=12}={}){let ids=history.slice(-this.ctx),a=this.forward(ids).logits.slice((ids.length-1)*V);a[BOS]=-Infinity;a[SEP]=-Infinity;let candidates=Array.from(a.keys()).sort((i,j)=>a[j]-a[i]).slice(0,topK),p=soft(Float32Array.from(candidates.map(i=>a[i]/temperature))),r=this.r();for(let i=0;i<p.length;i++){r-=p[i];if(r<=0)return candidates[i];}return candidates.at(-1);}
+ let norm=0;for(let a of Object.values(g))for(let v of a)norm+=v*v;let clip=Math.min(1,1/(Math.sqrt(norm)+1e-8));this.step++;this.optStep++;let c1=1-Math.pow(.9,this.optStep),c2=1-Math.pow(.999,this.optStep);for(let key in p){let a=p[key],m=this.m[key],v=this.v[key],b=g[key];for(let i=0;i<a.length;i++){let grad=b[i]*clip;m[i]=.9*m[i]+.1*grad;v[i]=.999*v[i]+.001*grad*grad;a[i]-=lr*(m[i]/c1)/(Math.sqrt(v[i]/c2)+1e-8);}}loss/=count;this.loss=this.loss===null?loss:.96*this.loss+.04*loss;return loss;}
+ sample(history,{temperature=.75,topK=12}={}){let ids=history.slice(-this.ctx),a=this.forward(ids).logits.slice((ids.length-1)*V);a[BOS]=-Infinity;a[SEP]=-Infinity;let candidates=Array.from(a.keys()).sort((i,j)=>a[j]-a[i]).slice(0,topK);if(temperature===0)return candidates[0];let p=soft(Float32Array.from(candidates.map(i=>a[i]/temperature))),r=this.r();for(let i=0;i<p.length;i++){r-=p[i];if(r<=0)return candidates[i];}return candidates.at(-1);}
  reply(prompt,max=140,temp=.75){let h=[BOS,...encode(prompt),SEP],out=[];for(let i=0;i<max;i++){let t=this.sample(h,{temperature:temp});if(t===EOS)break;out.push(t);h.push(t);}return decode(out).trim();}
- export(){let o={format:'origen-transformer-bpe-1',d:this.d,ctx:this.ctx,step:this.step,loss:this.loss,p:{},m:{},v:{}};for(let k in this.p)for(let q of ['p','m','v'])o[q][k]=pack(this[q][k]);return o;}
- static restore(o){if(o.format!=='origen-transformer-bpe-1'||![32,48,64].includes(o.d)||![32,64,96].includes(o.ctx))throw Error('Formato incompatible');let a=new Transformer(o);for(let k in a.p)for(let q of ['p','m','v']){let b=unpack(o[q]?.[k]);if(b.length!==a[q][k].length||!b.every(Number.isFinite))throw Error('Pesos dañados');a[q][k].set(b);}if(!Number.isSafeInteger(o.step)||o.step<0||!(o.loss===null||Number.isFinite(o.loss)))throw Error('Estado inválido');a.step=o.step;a.loss=o.loss;return a;}
+ // Function-preserving widening: keep old features isolated initially; new features can learn.
+ widen(d,ctx,seed=Date.now()){
+  if(![128,256].includes(d)||d<=this.d||![96,128].includes(ctx)||ctx<this.ctx)throw Error('Ampliación inválida');
+  const next=new Transformer({d,ctx,seed}), old=this.d, f=this.f, nf=next.f;
+  function copyRows(src,dst,rows,cols,oldStride,newStride,scale=1){for(let i=0;i<rows;i++)for(let j=0;j<cols;j++)dst[i*newStride+j]=src[i*oldStride+j]*scale;}
+  copyRows(this.p.E,next.p.E,V,old,old,d);copyRows(this.p.P,next.p.P,this.ctx,old,old,d);
+  // Q/K scaling compensates for attention's 1/sqrt(d). New Q block starts at zero.
+  const s=Math.pow(d/old,.25);
+  for(const k of ['Q','K','U','O']){
+   const p=next.p[k];for(let i=0;i<d;i++)for(let j=0;j<d;j++)if((i<old)!==(j<old)||k==='Q')p[i*d+j]=0;
+   copyRows(this.p[k],p,old,old,old,d,k==='Q'||k==='K'?s:1);
+  }
+  for(let i=0;i<d;i++)for(let j=0;j<nf;j++)if((i<old)!==(j<f))next.p.A[i*nf+j]=0;
+  for(let i=0;i<nf;i++)for(let j=0;j<d;j++)if((i<f)!==(j<old))next.p.B[i*d+j]=0;
+  copyRows(this.p.A,next.p.A,old,f,f,nf);copyRows(this.p.B,next.p.B,f,old,old,d);
+  next.p.W.fill(0);copyRows(this.p.W,next.p.W,old,V,V,V);next.p.b.set(this.p.b);
+  next.step=this.step;next.optStep=0;next.loss=this.loss;return next;
+ }
+ export(){let o={format:'origen-transformer-bpe-1',d:this.d,ctx:this.ctx,step:this.step,optStep:this.optStep,loss:this.loss,p:{},m:{},v:{}};for(let k in this.p)for(let q of ['p','m','v'])o[q][k]=pack(this[q][k]);return o;}
+ static restore(o){if(o.format!=='origen-transformer-bpe-1'||![32,48,64,128,256].includes(o.d)||![32,64,96,128].includes(o.ctx))throw Error('Formato incompatible');let a=new Transformer(o);for(let k in a.p)for(let q of ['p','m','v']){let b=unpack(o[q]?.[k]);if(b.length!==a[q][k].length||!b.every(Number.isFinite))throw Error('Pesos dañados');a[q][k].set(b);}if(!Number.isSafeInteger(o.step)||o.step<0||!(o.loss===null||Number.isFinite(o.loss)))throw Error('Estado inválido');a.step=o.step;a.optStep=o.optStep===undefined?o.step:o.optStep;if(!Number.isSafeInteger(a.optStep)||a.optStep<0||a.optStep>a.step)throw Error('Optimizador inválido');a.loss=o.loss;return a;}
 }
 const cached=new WeakMap();
 function example(model,item,random=Math.random){let a,mask;let c=cached.get(item);if(c){({a,mask}=c);}else if(item.kind==='dialog'){let q=encode(item.q),r=encode(item.a);a=[BOS,...q,SEP,...r,EOS];mask=q.length+2; // first answer token at index mask
