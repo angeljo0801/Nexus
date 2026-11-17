@@ -2,5 +2,5 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.origenai.local'
     compileSdk 35
-    defaultConfig { applicationId 'com.origenai.local'; minSdk 26; targetSdk 28; versionCode (System.getenv('GITHUB_RUN_NUMBER')?.toInteger() ?: 1); versionName '0.1' }
+    defaultConfig { applicationId 'com.origenai.local'; minSdk 26; targetSdk 28; versionCode (System.getenv('GITHUB_RUN_NUMBER')?.toInteger() ?: 1); versionName '0.2' }
 }

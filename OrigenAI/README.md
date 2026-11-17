@@ -16,3 +16,12 @@ Instala JDK 17, Gradle 8.9 y Android SDK 35 y ejecuta `gradle :app:assembleDebug
 
 ## Prueba reproducible
 `node tools/test_model.js`. Muestra una prueba de aprendizaje de un único diálogo y la restauración de pesos. La pérdida sobre entrenamiento no mide generalización.
+
+## Sincronización bidireccional (v0.2)
+El motor sigue siendo local. Crea un repositorio PRIVADO, inicializado con README, por ejemplo OrigenAI-Sync. Genera un fine-grained PAT de GitHub con acceso exclusivamente a ese repositorio y permiso Contents Read and write. No compartas el token ni lo incluyas en el código. Conecta desde la pestaña Conexión: el token se cifra en Android Keystore. ChatGPT puede escribir y leer ese repositorio si está autorizado en su conector. Nunca uses el repositorio público Nexus para datos de aprendizaje privados.
+
+Archivo entrante `origen-training.json` en rama predeterminada:
+```json
+{"version":1,"id":"lote-001","examples":[{"kind":"dialog","q":"¿Qué tal?","a":"Muy bien, ¿y tú?"},{"kind":"text","text":"Un texto de práctica."}],"steps":1000,"lr":0.003,"tests":["¿Cómo te va?"]}
+```
+IDs únicos, hasta 500 ejemplos por lote, 0 a 10000 pasos, tasas 0.003/0.001/0.0003, hasta 5 preguntas. No sobrescribir un lote antes de recibir confirmación en `origen-status.json`. Un dispositivo por canal. El teléfono descarga y muestra el lote; el usuario puede aplicarlo o autorizar ejecución automática mientras la app esté visible. El permiso automático se reinicia cada vez que se abre la app. El estado devuelve métricas y respuestas de evaluación solicitadas, no pesos ni conversaciones privadas. El entrenamiento se pausa al ocultar la app. No es entrenamiento remoto en servidor ni conexión permanente en segundo plano.
