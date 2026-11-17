@@ -45,12 +45,90 @@ class Transformer {
   next.step=this.step;next.optStep=0;next.loss=this.loss;return next;
  }
  export(){let o={format:'origen-transformer-bpe-1',d:this.d,ctx:this.ctx,step:this.step,optStep:this.optStep,loss:this.loss,p:{},m:{},v:{}};for(let k in this.p)for(let q of ['p','m','v'])o[q][k]=pack(this[q][k]);return o;}
- static restore(o){if(o.format!=='origen-transformer-bpe-1'||![32,48,64,128,256].includes(o.d)||![32,64,96,128].includes(o.ctx))throw Error('Formato incompatible');let a=new Transformer(o);for(let k in a.p)for(let q of ['p','m','v']){let b=unpack(o[q]?.[k]);if(b.length!==a[q][k].length||!b.every(Number.isFinite))throw Error('Pesos dañados');a[q][k].set(b);}if(!Number.isSafeInteger(o.step)||o.step<0||!(o.loss===null||Number.isFinite(o.loss)))throw Error('Estado inválido');a.step=o.step;a.optStep=o.optStep===undefined?o.step:o.optStep;if(!Number.isSafeInteger(a.optStep)||a.optStep<0||a.optStep>a.step)throw Error('Optimizador inválido');a.loss=o.loss;return a;}
+ static restore(o){if(o&&o.format==='origen-deep-bpe-2')return DeepTransformer.restore(o);if(o.format!=='origen-transformer-bpe-1'||![32,48,64,128,256].includes(o.d)||![32,64,96,128].includes(o.ctx))throw Error('Formato incompatible');let a=new Transformer(o);for(let k in a.p)for(let q of ['p','m','v']){let b=unpack(o[q]?.[k]);if(b.length!==a[q][k].length||!b.every(Number.isFinite))throw Error('Pesos dañados');a[q][k].set(b);}if(!Number.isSafeInteger(o.step)||o.step<0||!(o.loss===null||Number.isFinite(o.loss)))throw Error('Estado inválido');a.step=o.step;a.optStep=o.optStep===undefined?o.step:o.optStep;if(!Number.isSafeInteger(a.optStep)||a.optStep<0||a.optStep>a.step)throw Error('Optimizador inválido');a.loss=o.loss;return a;}
 }
+
+ // Extend the existing BPE dictionary without renumbering any learned token.
+ function extendedCodec(extra=[]){
+  if(!Array.isArray(extra)||extra.length>384)throw Error('Tokenizador inválido');
+  const merges=MERGES.concat(extra),ex=Array.from({length:259},(_,i)=>i<256?[i]:[]),rank=new Map(),v=259+merges.length;
+  for(let i=0;i<merges.length;i++){const pair=merges[i],id=i+259;if(!Array.isArray(pair)||pair.length!==2||pair.some(x=>!Number.isInteger(x)||x<0||x>=id||[BOS,EOS,SEP].includes(x)))throw Error('Merge inválido');const [a,b]=pair,key=a*2048+b;if(rank.has(key))throw Error('Merge duplicado');const bytes=ex[a].concat(ex[b]);if(bytes.length>128)throw Error('Token demasiado largo');ex.push(bytes);rank.set(key,id);}
+  return {v,extra,ex,encode(str){let a=Array.from(enc.encode(str));while(a.length>1){let best=Infinity;for(let i=0;i<a.length-1;i++){let r=rank.get(a[i]*2048+a[i+1]);if(r!==undefined&&r<best)best=r;}if(best===Infinity)break;let b=[];for(let i=0;i<a.length;i++){if(i+1<a.length&&rank.get(a[i]*2048+a[i+1])===best){b.push(best);i++;}else b.push(a[i]);}a=b;}return a;},decode(a){return dec.decode(Uint8Array.from(a.flatMap(x=>ex[x]||[])));}};
+ }
+ function learnMerges(corpus,maxV=1024){
+  const seq=[];let chars=0;for(const item of corpus){for(const raw of item.kind==='dialog'?[item.q,item.a]:[item.text]){if(typeof raw!=='string'||chars>=180000)continue;let t=raw.slice(0,Math.min(2000,180000-chars));chars+=t.length;if(t)seq.push(encode(t));}}
+  const extra=[],lengths=expansion.map(x=>x.length),known=new Set(MERGES.map(([a,b])=>a*2048+b));
+  while(V+extra.length<Math.min(1024,maxV)){
+   const counts=new Map();for(const a of seq)for(let j=0;j<a.length-1;j++){let l=a[j],r=a[j+1],k=l*2048+r;if(lengths[l]+lengths[r]<=24&&!known.has(k))counts.set(k,(counts.get(k)||0)+1);}
+   let best=-1,n=2;for(const [k,c] of counts)if(c>n){n=c;best=k;}if(best<0)break;
+   const l=Math.floor(best/2048),r=best%2048,id=V+extra.length;extra.push([l,r]);known.add(best);lengths.push(lengths[l]+lengths[r]);
+   for(let i=0;i<seq.length;i++){const a=seq[i],b=[];for(let j=0;j<a.length;j++){if(a[j]===l&&a[j+1]===r){b.push(id);j++;}else b.push(a[j]);}seq[i]=b;}
+  }return extra;
+ }
+ class DeepTransformer extends Transformer{
+  constructor({d=128,ctx=128,extra=[],seed=12345}={}){
+   super({d,ctx,seed});if(![48,64,128,256].includes(d)||![64,96,128].includes(ctx))throw Error('Arquitectura inválida');
+   this.codec=extendedCodec(extra);this.vocab=this.codec.v;this.layers=3;this.heads=4;
+   const v=this.vocab,f=this.f;this.shapes={E:[v,d],P:[ctx,d],Q:[d,d],K:[d,d],U:[d,d],O:[d,d],A:[d,f],B:[f,d],W:[d,v],b:[1,v]};
+   for(let l=1;l<3;l++)for(const [k,shape] of Object.entries({Q:[d,d],K:[d,d],U:[d,d],O:[d,d],A:[d,f],B:[f,d],g1:[1,d],g2:[1,d]}))this.shapes['L'+l+'_'+k]=shape;
+   this.p={};this.m={};this.v={};for(const [k,[a,b]] of Object.entries(this.shapes)){let w=this.p[k]=zeros(a*b);this.m[k]=zeros(w.length);this.v[k]=zeros(w.length);if(k.endsWith('_g1')||k.endsWith('_g2'))w.fill(1);else{let scale=k==='b'?0:k==='E'||k==='P'?.12:Math.sqrt(6/(a+b));for(let i=0;i<w.length;i++)w[i]=(this.r()*2-1)*scale;}}
+  }
+  encode(s){return this.codec.encode(s);}decode(a){return this.codec.decode(a);}
+  // RMS normalization and its exact backward derivative, with a trainable gain.
+  norm(x,g,n){let d=this.d,y=zeros(x.length),r=zeros(n);for(let i=0;i<n;i++){let sum=0;for(let j=0;j<d;j++)sum+=x[i*d+j]**2;let inv=r[i]=1/Math.sqrt(sum/d+1e-5);for(let j=0;j<d;j++)y[i*d+j]=x[i*d+j]*inv*g[j];}return {y,r};}
+  normBack(x,g,r,dy,dg,n){let d=this.d,dx=zeros(x.length);for(let i=0;i<n;i++){let dot=0,inv=r[i];for(let j=0;j<d;j++){let z=i*d+j;dot+=dy[z]*g[j]*x[z];dg[j]+=dy[z]*x[z]*inv;}for(let j=0;j<d;j++){let z=i*d+j;dx[z]=dy[z]*g[j]*inv-x[z]*dot*inv**3/d;}}return dx;}
+  block(x,n,l){let d=this.d,f=this.f,p=this.p,pre=l?'L'+l+'_':'',heads=l?this.heads:1,hd=d/heads,sc=1/Math.sqrt(hd);
+   let a=l?this.norm(x,p[pre+'g1'],n):{y:x,r:null},q=this.mm(a.y,p[pre+'Q'],n,d,d),k=this.mm(a.y,p[pre+'K'],n,d,d),u=this.mm(a.y,p[pre+'U'],n,d,d),att=zeros(heads*n*n),c=zeros(n*d);
+   for(let h=0;h<heads;h++)for(let i=0;i<n;i++){let scores=zeros(i+1),off=h*hd;for(let j=0;j<=i;j++){let z=0;for(let t=0;t<hd;t++)z+=q[i*d+off+t]*k[j*d+off+t];scores[j]=z*sc;}soft(scores);for(let j=0;j<=i;j++){let w=scores[j];att[(h*n+i)*n+j]=w;for(let t=0;t<hd;t++)c[i*d+off+t]+=w*u[j*d+off+t];}}
+   let y=this.mm(c,p[pre+'O'],n,d,d);for(let i=0;i<y.length;i++)y[i]+=x[i];let b=l?this.norm(y,p[pre+'g2'],n):{y,r:null},z=this.mm(b.y,p[pre+'A'],n,d,f);for(let i=0;i<z.length;i++)z[i]=Math.tanh(z[i]);let out=this.mm(z,p[pre+'B'],n,f,d);for(let i=0;i<out.length;i++)out[i]+=y[i];
+   return {x,a,q,k,u,att,c,y,b,z,out,pre,heads,hd};
+  }
+  blockBack(s,dy,g,n){let {x,a,q,k,u,att,c,y,b,z,pre,heads,hd}=s,d=this.d,f=this.f,p=this.p;
+   let dz=this.back(z,p[pre+'B'],dy,g[pre+'B'],n,f,d);for(let i=0;i<dz.length;i++)dz[i]*=1-z[i]**2;
+   let dh=this.back(b.y,p[pre+'A'],dz,g[pre+'A'],n,d,f);if(b.r)dh=this.normBack(y,p[pre+'g2'],b.r,dh,g[pre+'g2'],n);for(let i=0;i<dh.length;i++)dh[i]+=dy[i];
+   let dc=this.back(c,p[pre+'O'],dh,g[pre+'O'],n,d,d),dq=zeros(n*d),dk=zeros(n*d),du=zeros(n*d),sc=1/Math.sqrt(hd);
+   for(let h=0;h<heads;h++)for(let i=0;i<n;i++){let da=zeros(i+1),mean=0,off=h*hd;for(let j=0;j<=i;j++){let z=0,w=att[(h*n+i)*n+j];for(let t=0;t<hd;t++){let ii=i*d+off+t,jj=j*d+off+t;z+=dc[ii]*u[jj];du[jj]+=w*dc[ii];}da[j]=z;mean+=z*w;}for(let j=0;j<=i;j++){let w=att[(h*n+i)*n+j]*(da[j]-mean)*sc;for(let t=0;t<hd;t++){let ii=i*d+off+t,jj=j*d+off+t;dq[ii]+=w*k[jj];dk[jj]+=w*q[ii];}}}
+   let dx=this.back(a.y,p[pre+'Q'],dq,g[pre+'Q'],n,d,d),dxk=this.back(a.y,p[pre+'K'],dk,g[pre+'K'],n,d,d),dxu=this.back(a.y,p[pre+'U'],du,g[pre+'U'],n,d,d);for(let i=0;i<dx.length;i++)dx[i]+=dxk[i]+dxu[i];if(a.r)dx=this.normBack(x,p[pre+'g1'],a.r,dx,g[pre+'g1'],n);for(let i=0;i<dx.length;i++)dx[i]+=dh[i];return dx;
+  }
+  forward(ids){let n=ids.length,d=this.d,v=this.vocab,p=this.p,x=zeros(n*d);if(n<1||n>this.ctx)throw Error('Contexto inválido');for(let i=0;i<n;i++)for(let j=0;j<d;j++)x[i*d+j]=p.E[ids[i]*d+j]+p.P[i*d+j];let blocks=[];for(let l=0;l<this.layers;l++){let s=this.block(x,n,l);blocks.push(s);x=s.out;}let logits=this.mm(x,p.W,n,d,v);for(let i=0;i<n;i++)for(let j=0;j<v;j++)logits[i*v+j]+=p.b[j];return {n,y:x,blocks,logits};}
+  train(ids,targets,lr=.001){let {n,y,blocks,logits}=this.forward(ids),d=this.d,v=this.vocab,p=this.p,g={};for(let k in p)g[k]=zeros(p[k].length);let dl=zeros(n*v),loss=0,count=targets.filter(t=>t>=0).length;if(!count)return null;
+   for(let i=0;i<n;i++){let t=targets[i];if(t<0)continue;let prob=soft(logits.slice(i*v,(i+1)*v));loss-=Math.log(Math.max(1e-12,prob[t]));for(let j=0;j<v;j++){let z=(prob[j]-(j===t?1:0))/count;dl[i*v+j]=z;g.b[j]+=z;}}
+   let dx=this.back(y,p.W,dl,g.W,n,d,v);for(let l=blocks.length-1;l>=0;l--)dx=this.blockBack(blocks[l],dx,g,n);
+   for(let i=0;i<n;i++)for(let j=0;j<d;j++){let z=i*d+j;g.E[ids[i]*d+j]+=dx[z];g.P[z]+=dx[z];}
+   let norm=0;for(let a of Object.values(g))for(let z of a)norm+=z*z;if(!Number.isFinite(norm)||!Number.isFinite(loss))throw Error('Gradiente no finito; entrenamiento detenido');
+   let clip=Math.min(1,1/(Math.sqrt(norm)+1e-8));this.step++;this.optStep++;let c1=1-Math.pow(.9,this.optStep),c2=1-Math.pow(.999,this.optStep);
+   for(let key in p){let a=p[key],m=this.m[key],vv=this.v[key],b=g[key];for(let i=0;i<a.length;i++){let grad=b[i]*clip;m[i]=.9*m[i]+.1*grad;vv[i]=.999*vv[i]+.001*grad*grad;a[i]-=lr*(m[i]/c1)/(Math.sqrt(vv[i]/c2)+1e-8);}}
+   loss/=count;this.loss=this.loss===null?loss:.96*this.loss+.04*loss;return loss;
+  }
+  sample(history,{temperature=.75,topK=12}={}){let ids=history.slice(-this.ctx),v=this.vocab,a=this.forward(ids).logits.slice((ids.length-1)*v);a[BOS]=-Infinity;a[SEP]=-Infinity;let c=Array.from(a.keys()).sort((i,j)=>a[j]-a[i]).slice(0,topK);if(temperature===0)return c[0];let p=soft(Float32Array.from(c.map(i=>a[i]/temperature))),r=this.r();for(let i=0;i<p.length;i++){r-=p[i];if(r<=0)return c[i];}return c.at(-1);}
+  reply(prompt,max=48,temp=.45){let h=[BOS,...this.encode(prompt).slice(-(this.ctx-2)),SEP],out=[];for(let i=0;i<max;i++){let t=this.sample(h,{temperature:temp});if(t===EOS)break;out.push(t);h.push(t);}return this.decode(out).trim();}
+  widen(){throw Error('El modelo de tres capas ya usa su arquitectura avanzada.');}
+  export(){let o=super.export();o.format='origen-deep-bpe-2';o.extra=this.codec.extra;return o;}
+  static restore(o){let a=new DeepTransformer({d:o.d,ctx:o.ctx,extra:o.extra});for(let k in a.p)for(let q of ['p','m','v']){let b=unpack(o[q]?.[k]);if(b.length!==a[q][k].length||!b.every(Number.isFinite))throw Error('Pesos dañados');a[q][k].set(b);}if(!Number.isSafeInteger(o.step)||o.step<0||!Number.isSafeInteger(o.optStep)||o.optStep<0||o.optStep>o.step||!(o.loss===null||Number.isFinite(o.loss)))throw Error('Estado inválido');a.step=o.step;a.optStep=o.optStep;a.loss=o.loss;return a;}
+  static upgrade(old,corpus,maxV=1024,seed=Date.now()){
+   if(old instanceof DeepTransformer)throw Error('Ya usa tres capas');const next=new DeepTransformer({d:old.d,ctx:old.ctx,extra:learnMerges(corpus,maxV),seed}),d=old.d,v=next.vocab;
+   for(let key of ['P','Q','K','U','O','A','B'])next.p[key].set(old.p[key]);
+   next.p.E.set(old.p.E);for(let i=0;i<d;i++)next.p.W.set(old.p.W.subarray(i*V,(i+1)*V),i*v);next.p.b.set(old.p.b);
+   // New BPE tokens start from constituent embeddings; output columns need training.
+   for(let id=V;id<v;id++){let [a,b]=next.codec.extra[id-V];for(let j=0;j<d;j++){next.p.E[id*d+j]=(next.p.E[a*d+j]+next.p.E[b*d+j])/2;next.p.W[j*v+id]=(next.p.W[j*v+a]+next.p.W[j*v+b])/2;}next.p.b[id]=-4;}
+   // Both residual blocks start as identity; old network is retained, Adam reset.
+   for(let l=1;l<3;l++){next.p['L'+l+'_O'].fill(0);next.p['L'+l+'_B'].fill(0);}
+   next.step=old.step;next.optStep=0;next.loss=null;return next;
+  }
+ }
+ const deepCache=new WeakMap();
+ function deepExample(model,item,random=Math.random){
+  let entry=deepCache.get(item);if(!entry||entry.codec!==model.codec){entry={codec:model.codec,q:item.kind==='dialog'?model.encode(item.q):null,r:model.encode(item.kind==='dialog'?item.a:item.text)};deepCache.set(item,entry);}
+  const {q,r}=entry,ctx=model.ctx;
+  if(item.kind==='dialog'){let prompt=q.slice(-Math.min(q.length,Math.floor(ctx*.65))),room=ctx-prompt.length-2;let answer=r.slice(0,room);let seq=[BOS,...prompt,SEP,...answer];if(answer.length===r.length)seq.push(EOS);let ids=seq.slice(0,-1),targets=seq.slice(1).map((t,i)=>i>=prompt.length+1?t:-1);return targets.some(t=>t>=0)?[ids,targets]:null;}
+  let seq=[BOS,...r,EOS],start=Math.max(0,Math.floor(random()*Math.max(1,seq.length-ctx)));let ids=seq.slice(start,start+ctx),targets=seq.slice(start+1,start+ctx+1);return targets.length?[ids.slice(0,targets.length),targets]:null;
+ }
+ function referenceLoss(model,items){let sum=0,n=0;for(const item of items){const ex=example(model,item,()=>0);if(!ex)continue;let logits=model.forward(ex[0]).logits,v=model.vocab||V;for(let i=0;i<ex[1].length;i++){let t=ex[1][i];if(t<0)continue;let p=soft(logits.slice(i*v,(i+1)*v));sum-=Math.log(Math.max(1e-12,p[t]));n++;}}return n?sum/n:null;}
+
 const cached=new WeakMap();
-function example(model,item,random=Math.random){let a,mask;let c=cached.get(item);if(c){({a,mask}=c);}else if(item.kind==='dialog'){let q=encode(item.q),r=encode(item.a);a=[BOS,...q,SEP,...r,EOS];mask=q.length+2; // first answer token at index mask
+function example(model,item,random=Math.random){if(model instanceof DeepTransformer)return deepExample(model,item,random);let a,mask;let c=cached.get(item);if(c){({a,mask}=c);}else if(item.kind==='dialog'){let q=encode(item.q),r=encode(item.a);a=[BOS,...q,SEP,...r,EOS];mask=q.length+2; // first answer token at index mask
 }else{a=[BOS,...encode(item.text),EOS];mask=1;}
  if(!c)cached.set(item,{a,mask});
  let last=a.length-1;if(last<1)return null;let start=0;if(last>model.ctx){let min=item.kind==='dialog'?Math.max(0,mask-model.ctx):0;let max=last-model.ctx;start=min>max?max:min+Math.floor(random()*(max-min+1));}let ids=a.slice(start,start+model.ctx),targets=a.slice(start+1,start+1+model.ctx);ids=ids.slice(0,targets.length);targets=targets.map((t,i)=>start+i+1>=mask?t:-1);if(!targets.some(x=>x>=0))return null;return [ids,targets];}
-const api={Transformer,encode,decode,example,BOS,EOS,SEP,V};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.Origen=api;
+const api={Transformer,DeepTransformer,encode,decode,example,referenceLoss,BOS,EOS,SEP,V};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.Origen=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

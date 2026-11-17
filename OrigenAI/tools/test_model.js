@@ -15,3 +15,21 @@ for(const [width,context,count] of [[128,96,307840],[256,128,885376]]){
   let restored=Transformer.restore(big.export());assert.equal(restored.count(),count);assert.equal(restored.step,big.step);assert.equal(restored.optStep,1);
   console.log({width,context,count,maxLogitError:err,loss:big.loss});
 }
+
+const {DeepTransformer,referenceLoss}=require('../app/src/main/assets/model.js');
+const corpusDeep=[{kind:'dialog',q:'Hola, ¿qué tal?',a:'Muy bien, gracias.'},{kind:'text',text:'conversación conversación conversación conversación conversación.'}];
+const deepOld=new Transformer({d:48,ctx:64});deepOld.train(...example(deepOld,corpusDeep[0]),.001);
+const identity=DeepTransformer.upgrade(deepOld,corpusDeep,640,42);
+const input=[256,...encode('Hola'),258],l0=deepOld.forward(input).logits,l1=identity.forward(input).logits;
+for(let i=0;i<l0.length;i++)assert(Math.abs(l0[i]-l1[i])<0.0002);
+const deep=DeepTransformer.upgrade(deepOld,corpusDeep,1024,42);
+assert.equal(deep.layers,3);assert.equal(deep.heads,4);assert(deep.vocab>640);
+assert.equal(deep.decode(deep.encode('¡Hola, conversación!')),'¡Hola, conversación!');
+let long=example(deep,{kind:'dialog',q:'hola '.repeat(100),a:'adiós '.repeat(100)});assert(long[0].length<=deep.ctx);
+const initialDeep=referenceLoss(deep,[corpusDeep[0]]);
+for(let i=0;i<5;i++)deep.train(...example(deep,corpusDeep[0]),.001);
+assert(referenceLoss(deep,[corpusDeep[0]])<initialDeep);
+assert(deep.p.L1_O.some(x=>x!==0));assert(deep.p.L2_B.some(x=>x!==0));
+const restoredDeep=Transformer.restore(deep.export());assert.equal(restoredDeep.step,deep.step);assert.equal(restoredDeep.vocab,deep.vocab);
+assert.equal(restoredDeep.count(),deep.count());assert.equal(restoredDeep.reply('Hola',12,0),deep.reply('Hola',12,0));
+console.log({deepParameters:deep.count(),vocab:deep.vocab,layers:deep.layers,referenceLoss:referenceLoss(deep,[corpusDeep[0]])});
