@@ -23,7 +23,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+      - run: node --check app/src/main/assets/sync.js
       - run: node tools/test_model.js
       - run: gradle :app:assembleDebug
       - name: Sign Origen APK with persistent repository certificate

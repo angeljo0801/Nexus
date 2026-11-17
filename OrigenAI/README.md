@@ -1,6 +1,6 @@
-# Origen AI v0.1
+# Origen AI v0.2
 
-Aplicación Android experimental, independiente de Nexus. ID: `com.origenai.local`. Funciona localmente sin permiso INTERNET. El modelo Transformer causal de una capa y una cabeza de atención tiene 83.584 parámetros, ventana de 64 tokens y tokenizador BPE de 640 tokens entrenado sobre un corpus original. Los pesos se inicializan aleatoriamente en cada instalación nueva. Se incluyen 88 ejemplos de entrenamiento, no respuestas programadas ni un modelo preentrenado.
+Aplicación Android experimental, independiente de Nexus. ID: `com.origenai.local`. El motor funciona localmente; el permiso INTERNET se utiliza solo para la conexión privada opcional. El modelo Transformer causal de una capa y una cabeza de atención tiene 83.584 parámetros, ventana de 64 tokens y tokenizador BPE de 640 tokens entrenado sobre un corpus original. Los pesos se inicializan aleatoriamente en cada instalación nueva. Se incluyen 88 ejemplos de entrenamiento, no respuestas programadas ni un modelo preentrenado.
 
 ## Primer entrenamiento
 1. Instala la APK y abre Entrenar.
