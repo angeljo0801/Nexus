@@ -29,6 +29,11 @@ jobs:
       - run: node --check app/src/main/assets/sync.js
       - run: node -e "const fs=require('fs'),vm=require('vm');const s=fs.readFileSync('app/src/main/assets/index.html','utf8');for(const m of s.matchAll(/<script>([\\s\\S]*?)<\\/script>/g))new vm.Script(m[1]);"
       - run: node tools/test_model.js
+      - name: Test native neural engine
+        run: |
+          mkdir -p /tmp/origen-native-test
+          javac -d /tmp/origen-native-test app/src/main/java/com/origenai/local/NativeModel.java tools/NativeModelTest.java
+          java -cp /tmp/origen-native-test com.origenai.local.NativeModelTest
       - run: gradle :app:assembleDebug
       - name: Sign Origen APK with persistent repository certificate
         env:

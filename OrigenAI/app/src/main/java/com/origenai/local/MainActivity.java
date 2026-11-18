@@ -60,7 +60,7 @@ public class MainActivity extends Activity {
     }
     private static final int MAX_MODEL_BYTES=96*1024*1024;
     private static final int EXPORT_MODEL=713, IMPORT_MODEL=714;
-    private final Object checkpointLock=new Object();
+    private final Object checkpointLock=TrainingService.FILE_LOCK;
     private AtomicFile checkpoint(boolean backup){return new AtomicFile(new File(getFilesDir(),backup?"origen-before-expand.json":"origen-checkpoint.json"));}
     private String readModel(AtomicFile file) throws IOException {
         if(!file.getBaseFile().exists()&&!new File(file.getBaseFile().getPath()+".bak").exists())return "";
@@ -72,10 +72,16 @@ public class MainActivity extends Activity {
         FileOutputStream stream=null;try{stream=file.startWrite();stream.write(bytes);file.finishWrite(stream);}catch(IOException e){if(stream!=null)file.failWrite(stream);throw e;}
     }
     private class ModelStore {
+        @JavascriptInterface public boolean nativeActive(){return TrainingService.isActive();}
+        @JavascriptInterface public String nativeProgress(){return TrainingService.status();}
+        @JavascriptInterface public boolean startNative(int count,double lr,boolean remote){return TrainingService.launch(MainActivity.this,count,lr,remote);}
+        @JavascriptInterface public void pauseNative(){TrainingService.requestPause();}
+        @JavascriptInterface public boolean notificationEnabled(){return getSystemService(android.app.NotificationManager.class).areNotificationsEnabled();}
+
         @JavascriptInterface public void keepAwake(boolean enabled){runOnUiThread(()->{if(enabled)getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);});}
         @JavascriptInterface public String read(){synchronized(checkpointLock){try{return readModel(checkpoint(false));}catch(Exception e){return "!ERROR";}}}
-        @JavascriptInterface public boolean write(String json){synchronized(checkpointLock){try{writeModel(checkpoint(false),json);return true;}catch(Exception e){return false;}}}
-        @JavascriptInterface public boolean archive(String json){synchronized(checkpointLock){try{writeModel(checkpoint(true),json);return true;}catch(Exception e){return false;}}}
+        @JavascriptInterface public boolean write(String json){synchronized(checkpointLock){if(TrainingService.isActive())return false;try{writeModel(checkpoint(false),json);return true;}catch(Exception e){return false;}}}
+        @JavascriptInterface public boolean archive(String json){synchronized(checkpointLock){if(TrainingService.isActive())return false;try{writeModel(checkpoint(true),json);return true;}catch(Exception e){return false;}}}
         @JavascriptInterface public String imported(){synchronized(checkpointLock){try{return readModel(new AtomicFile(new File(getFilesDir(),"origen-import.json")));}catch(Exception e){return "!ERROR";}}}
         @JavascriptInterface public String archived(){synchronized(checkpointLock){try{return readModel(checkpoint(true));}catch(Exception e){return "!ERROR";}}}
         @JavascriptInterface public void exportFile(){runOnUiThread(()->{Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/json");i.addCategory(Intent.CATEGORY_OPENABLE);i.putExtra(Intent.EXTRA_TITLE,"OrigenAI-backup.json");try{startActivityForResult(i,EXPORT_MODEL);}catch(Exception e){modelNotice("No se pudo abrir el selector de archivos.");}});}
@@ -153,5 +159,6 @@ public class MainActivity extends Activity {
             });
         }
     }
+    @Override protected void onResume(){super.onResume();if(web!=null)web.evaluateJavascript("window.origenPollNative&&window.origenPollNative()",null);}
     @Override protected void onDestroy(){io.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
 }
