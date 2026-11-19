@@ -126,6 +126,8 @@ public class MainActivity extends Activity {
     private void reply(String id,JSONObject value){runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenSyncReply("+JSONObject.quote(id)+","+JSONObject.quote(value.toString())+")",null);});}
     private class SyncBridge {
         @JavascriptInterface public String repository(){return prefs().getString("repo","");}
+        @JavascriptInterface public boolean autoEnabled(){return !repository().isEmpty()&&prefs().getBoolean("auto_enabled",false);}
+        @JavascriptInterface public boolean setAutoEnabled(boolean enabled){return prefs().edit().putBoolean("auto_enabled",enabled&&!repository().isEmpty()).commit();}
         @JavascriptInterface public void request(String id,String op,String a,String b){
             if(id==null||id.length()>100)return;
             io.execute(()->{JSONObject out=new JSONObject();try{
@@ -133,7 +135,9 @@ public class MainActivity extends Activity {
                 else if("configure".equals(op)){
                     if(b==null||b.length()<20||b.length()>1024||b.matches(".*\\s.*"))throw new IOException("Token inválido");
                     checkPrivate(a,b);
-                    if(!prefs().edit().putString("repo",a).putString("token",encrypt(b)).commit())throw new IOException("No se pudo guardar conexión");
+                    SharedPreferences.Editor edit=prefs().edit().putString("repo",a).putString("token",encrypt(b));
+                    if(!a.equals(repository()))edit.remove("auto_enabled");
+                    if(!edit.commit())throw new IOException("No se pudo guardar conexión");
                     out.put("ok",true);
                 }else{
                     String repo=repository(),tok=token();checkPrivate(repo,tok);
@@ -159,6 +163,6 @@ public class MainActivity extends Activity {
             });
         }
     }
-    @Override protected void onResume(){super.onResume();if(web!=null)web.evaluateJavascript("window.origenPollNative&&window.origenPollNative()",null);}
+    @Override protected void onResume(){super.onResume();if(web!=null)web.evaluateJavascript("window.origenPollNative&&window.origenPollNative();window.origenResumeSync&&window.origenResumeSync()",null);}
     @Override protected void onDestroy(){io.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
 }

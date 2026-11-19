@@ -47,7 +47,7 @@ public final class TrainingService extends Service {
         return new Notification.Builder(this,CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Origen AI · Entrenamiento").setContentText(message).setStyle(new Notification.BigTextStyle().bigText(message)).setContentIntent(pi).setOngoing(true).setOnlyAlertOnce(true).setProgress(Math.max(1,total),Math.min(done,total),done==0).addAction(new Notification.Action.Builder(null,"Pausar y guardar",stop).build()).build();
     }
     @Override public int onStartCommand(Intent i,int flags,int id){
-        if(i!=null&&ACTION_PAUSE.equals(i.getAction())){requestPause();if(worker==null)stopSelf();return START_NOT_STICKY;}
+        if(i!=null&&ACTION_PAUSE.equals(i.getAction())){getSharedPreferences("origen_sync",MODE_PRIVATE).edit().putBoolean("auto_enabled",false).commit();requestPause();if(worker==null)stopSelf();return START_NOT_STICKY;}
         if(i==null||!active){stopSelf();return START_NOT_STICKY;}
         if(worker!=null)return START_NOT_STICKY;
         int total=i.getIntExtra("count",0);double lr=i.getDoubleExtra("lr",.0003);boolean remote=i.getBooleanExtra("remote",false);
@@ -135,6 +135,7 @@ public final class TrainingService extends Service {
             if(remote&&!phase.equals("Completado"))try{push(root,m,job,"paused",null,null,null);}catch(Exception e){error="No se pudo sincronizar la pausa: "+e.getMessage();}
         }catch(Throwable e){error=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();phase="Error de entrenamiento";if(loaded&&m!=null&&root!=null){try{saveModel(root,m);}catch(Exception ignored){}if(remote&&job!=null)try{push(root,m,job,"paused",null,null,error);}catch(Exception ignored){}}}
         finally{
+            if(remote&&!phase.equals("Completado"))getSharedPreferences("origen_sync",MODE_PRIVATE).edit().putBoolean("auto_enabled",false).commit();
             publish(m,done,total,start,phase,false,error);finished=true;
             if(wake!=null&&wake.isHeld())wake.release();if(destroyed){active=false;}else{stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}
         }
