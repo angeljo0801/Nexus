@@ -21,7 +21,7 @@ extern "C" JNIEXPORT jstring JNICALL Java_com_origenai_local_LocalLlama_nativeLo
  if(model&&filename==file)return e->NewStringUTF("Modelo listo");
  stop.store(true);unload();
  if(!initialized){llama_backend_init();initialized=true;}
- auto mp=llama_model_default_params();mp.n_gpu_layers=0;mp.use_mmap=true;
+ auto mp=llama_model_default_params();mp.n_gpu_layers=0;
  model=llama_model_load_from_file(file.c_str(),mp);
  if(!model){err(e,"No se pudo abrir el GGUF; revisa memoria y descarga");return nullptr;}
  auto cp=llama_context_default_params();cp.n_ctx=nctx;cp.n_batch=512;cp.n_ubatch=128;cp.n_threads=4;cp.n_threads_batch=4;
