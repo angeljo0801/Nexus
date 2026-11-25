@@ -6,7 +6,7 @@ const DEFAULT={version:1,transport:'ollama',endpoint:'http://127.0.0.1:11434',mo
 let config={...DEFAULT},pending=new Map(),lastPair=null,serial=0,busy=false;
 const info=t=>{$('preStatus').textContent=t;};
 window.origenPretrainedNotice=info;
-window.origenPretrainedReply=(id,json)=>{const cb=pending.get(id);if(cb){pending.delete(id);cb(json);}};
+window.origenPretrainedReply=(id,json)=>{const cb=pending.get(id);if(cb){pending.delete(id);try{cb(typeof json==='string'?JSON.parse(json):json);}catch(e){cb({ok:false,error:'Respuesta inválida del motor local'});}}};
 function load(){if(!bridge)return;try{const raw=bridge.read();if(raw==='!ERROR')throw Error('No se pudo leer el guardado independiente');if(raw){const x=JSON.parse(raw);if(x.version===1){config={...DEFAULT,...x};config.messages=Array.isArray(x.messages)?x.messages.slice(-40):[];config.examples=Array.isArray(x.examples)?x.examples.slice(-600):[];}}}catch(e){info('Error leyendo la memoria preentrenada: '+e.message);}}
 function save(){if(!bridge)return false;config.messages=config.messages.slice(-40);config.examples=config.examples.slice(-600);let ok=bridge.write(JSON.stringify(config));if(!ok)info('No se pudo guardar. No elimines los datos de la aplicación.');return ok;}
 function capture(){config.transport=$('preTransport').value;config.endpoint=$('preEndpoint').value.trim().replace(/\/$/,'');config.model=$('preModel').value.trim();return config;}
