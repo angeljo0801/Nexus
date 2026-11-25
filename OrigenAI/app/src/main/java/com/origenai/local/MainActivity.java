@@ -55,11 +55,13 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {return !url.equals("file:///android_asset/index.html");}
         });
         web.addJavascriptInterface(new SyncBridge(),"OrigenSync");
+        web.addJavascriptInterface(new PretrainedBridge(),"OrigenPretrained");
         web.addJavascriptInterface(new ModelStore(),"OrigenStore");
         setContentView(web); web.loadUrl("file:///android_asset/index.html");
     }
     private static final int MAX_MODEL_BYTES=96*1024*1024;
-    private static final int EXPORT_MODEL=713, IMPORT_MODEL=714;
+    private static final int EXPORT_MODEL=713, IMPORT_MODEL=714, EXPORT_PRETRAIN=715;
+    private volatile String pretrainedExport="";
     private final Object checkpointLock=TrainingService.FILE_LOCK;
     private AtomicFile checkpoint(boolean backup){return new AtomicFile(new File(getFilesDir(),backup?"origen-before-expand.json":"origen-checkpoint.json"));}
     private String readModel(AtomicFile file) throws IOException {
@@ -91,11 +93,12 @@ public class MainActivity extends Activity {
     private void modelNotice(String text){runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenFileNotice("+JSONObject.quote(text)+")",null);});}
     @Override protected void onActivityResult(int request,int result,Intent intent){
         super.onActivityResult(request,result,intent);
-        if(request!=EXPORT_MODEL&&request!=IMPORT_MODEL)return;
+        if(request!=EXPORT_MODEL&&request!=IMPORT_MODEL&&request!=EXPORT_PRETRAIN)return;
         if(result!=RESULT_OK||intent==null||intent.getData()==null){modelNotice("Operación cancelada.");return;}
         Uri uri=intent.getData();
         io.execute(()->{try{
-            if(request==EXPORT_MODEL){synchronized(checkpointLock){String value=readModel(checkpoint(false));if(value.isEmpty())throw new IOException();try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException();out.write(value.getBytes(StandardCharsets.UTF_8));}}modelNotice("Respaldo exportado.");}
+            if(request==EXPORT_PRETRAIN){String value=pretrainedExport;pretrainedExport="";try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException();out.write(value.getBytes(StandardCharsets.UTF_8));}pretrainedNotice("Ejemplos exportados para entrenamiento LoRA.");}
+            else if(request==EXPORT_MODEL){synchronized(checkpointLock){String value=readModel(checkpoint(false));if(value.isEmpty())throw new IOException();try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException();out.write(value.getBytes(StandardCharsets.UTF_8));}}modelNotice("Respaldo exportado.");}
             else{
                 ByteArrayOutputStream out=new ByteArrayOutputStream();try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException();byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1){if(out.size()+n>MAX_MODEL_BYTES)throw new IOException();out.write(buf,0,n);}}
                 String value=new String(out.toByteArray(),StandardCharsets.UTF_8);
@@ -104,6 +107,48 @@ public class MainActivity extends Activity {
                 runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenImportReady()",null);});
             }
         }catch(Exception e){modelNotice("No se pudo procesar el archivo.");}});
+    }
+    private void pretrainedNotice(String message){runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenPretrainedNotice&&window.origenPretrainedNotice("+JSONObject.quote(message)+")",null);});}
+    private void pretrainedReply(String id,JSONObject response){runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenPretrainedReply("+JSONObject.quote(id)+","+JSONObject.quote(response.toString())+")",null);});}
+    private static URL localEndpoint(String endpoint,String transport) throws Exception {
+        if(endpoint==null||endpoint.length()>160||!transport.equals("ollama")&&!transport.equals("openai"))throw new IOException("Configuración inválida");
+        java.net.URI uri=new java.net.URI(endpoint.trim());
+        String host=uri.getHost();int port=uri.getPort();
+        if(!"http".equals(uri.getScheme())||host==null||port<1||port>65535||uri.getRawUserInfo()!=null||uri.getRawQuery()!=null||uri.getRawFragment()!=null||(uri.getRawPath()!=null&&!uri.getRawPath().isEmpty()&&!uri.getRawPath().equals("/")))throw new IOException("Introduce una dirección HTTP local y un puerto");
+        String h=host.toLowerCase(java.util.Locale.ROOT);
+        if(!h.equals("localhost")&&!h.equals("127.0.0.1")&&!h.equals("::1")&&!h.matches("(?:10\\\\.[0-9]{1,3}\\\\.[0-9]{1,3}\\\\.[0-9]{1,3}|192\\\\.168\\\\.[0-9]{1,3}\\\\.[0-9]{1,3}|172\\\\.(?:1[6-9]|2[0-9]|3[01])\\\\.[0-9]{1,3}\\\\.[0-9]{1,3})"))throw new IOException("Solo se permiten motores locales o de la red privada");
+        java.net.InetAddress a=java.net.InetAddress.getByName(host);
+        if(!a.isLoopbackAddress()&&!a.isSiteLocalAddress())throw new IOException("Dirección fuera de la red privada");
+        String path=transport.equals("ollama")?"/api/chat":"/v1/chat/completions";
+        return new URL("http",host,port,path);
+    }
+    private class PretrainedBridge {
+        private final AtomicFile file=new AtomicFile(new File(getFilesDir(),"origen-pretrained.json"));
+        @JavascriptInterface public String read(){synchronized(checkpointLock){try{return readModel(file);}catch(Exception e){return "!ERROR";}}}
+        @JavascriptInterface public boolean write(String json){synchronized(checkpointLock){try{if(json==null||json.length()>1500000)return false;JSONObject obj=new JSONObject(json);if(obj.optInt("version")!=1)return false;writeModel(file,json);return true;}catch(Exception e){return false;}}}
+        @JavascriptInterface public void exportExamples(String jsonl){if(jsonl==null||jsonl.length()>1200000)return;pretrainedExport=jsonl;runOnUiThread(()->{Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/x-ndjson");i.addCategory(Intent.CATEGORY_OPENABLE);i.putExtra(Intent.EXTRA_TITLE,"OrigenAI-LoRA.jsonl");try{startActivityForResult(i,EXPORT_PRETRAIN);}catch(Exception e){pretrainedNotice("No se pudo abrir el selector de archivos.");}});}
+        @JavascriptInterface public void request(String id,String endpoint,String transport,String model,String messages){
+            if(id==null||id.length()>60)return;
+            io.execute(()->{JSONObject result=new JSONObject();try{
+                URL url=localEndpoint(endpoint,transport);
+                if(model==null||model.length()>120||model.trim().isEmpty())throw new IOException("Modelo inválido");
+                org.json.JSONArray input=new org.json.JSONArray(messages);
+                if(input.length()<1||input.length()>24||messages.length()>18000)throw new IOException("Conversación demasiado larga");
+                for(int i=0;i<input.length();i++){JSONObject row=input.getJSONObject(i);String role=row.getString("role"),content=row.getString("content");if(!role.equals("system")&&!role.equals("user")&&!role.equals("assistant")||content.length()>3500)throw new IOException("Mensaje inválido");}
+                JSONObject body=new JSONObject().put("model",model).put("messages",input).put("stream",false);
+                if(transport.equals("ollama"))body.put("options",new JSONObject().put("num_ctx",2048));else body.put("max_tokens",256);
+                HttpURLConnection c=(HttpURLConnection)url.openConnection();try{
+                    c.setInstanceFollowRedirects(false);c.setConnectTimeout(10000);c.setReadTimeout(120000);c.setRequestMethod("POST");c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json; charset=utf-8");
+                    try(OutputStream o=c.getOutputStream()){o.write(body.toString().getBytes(StandardCharsets.UTF_8));}
+                    int code=c.getResponseCode();if(code!=200)throw new IOException("Motor HTTP "+code+"; comprueba que el modelo esté cargado");
+                    ByteArrayOutputStream output=new ByteArrayOutputStream();try(InputStream in=c.getInputStream()){byte[] buf=new byte[8192];int n;while((n=in.read(buf))!=-1){if(output.size()+n>600000)throw new IOException("Respuesta demasiado larga");output.write(buf,0,n);}}
+                    JSONObject raw=new JSONObject(new String(output.toByteArray(),StandardCharsets.UTF_8));
+                    String answer=transport.equals("ollama")?raw.getJSONObject("message").optString("content",""):raw.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content","");
+                    if(answer.trim().isEmpty())throw new IOException("El motor devolvió una respuesta vacía");
+                    result.put("ok",true).put("answer",answer);
+                }finally{c.disconnect();}
+            }catch(Exception e){try{result=new JSONObject().put("ok",false).put("error",e.getMessage()==null?"Error del motor local":e.getMessage());}catch(Exception ignored){}}pretrainedReply(id,result);});
+        }
     }
     private static class Response { int code; String body; Response(int c,String b){code=c;body=b;} }
     private Response http(String repo,String tok,String suffix,String method,String body) throws Exception {
@@ -165,5 +210,5 @@ public class MainActivity extends Activity {
         }
     }
     @Override protected void onResume(){super.onResume();if(web!=null)web.evaluateJavascript("window.origenPollNative&&window.origenPollNative();window.origenResumeSync&&window.origenResumeSync()",null);}
-    @Override protected void onDestroy(){io.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
+    @Override protected void onDestroy(){io.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenPretrained");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
 }
