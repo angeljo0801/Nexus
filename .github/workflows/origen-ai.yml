@@ -34,6 +34,11 @@ jobs:
       - run: node --check app/src/main/assets/pretrained_remote.js
       - run: node tools/test_pretrained_remote.js
       - run: node tools/test_pretrained.js
+      - name: Test response cleanup without Android dependencies
+        run: |
+          mkdir -p /tmp/origen-response-test
+          javac -d /tmp/origen-response-test app/src/main/java/com/origenai/local/ResponseQuality.java tools/ResponseQualityTest.java
+          java -cp /tmp/origen-response-test com.origenai.local.ResponseQualityTest
       - run: python -m unittest discover -s tools -p "test_dataset_*.py"
       - run: node -e "const fs=require('fs'),vm=require('vm');const s=fs.readFileSync('app/src/main/assets/index.html','utf8');for(const m of s.matchAll(/<script>([\\s\\S]*?)<\\/script>/g))new vm.Script(m[1]);"
       - run: node tools/test_model.js

@@ -151,7 +151,7 @@ public class MainActivity extends Activity {
                     JSONObject raw=new JSONObject(new String(output.toByteArray(),StandardCharsets.UTF_8));
                     String answer=transport.equals("ollama")?raw.getJSONObject("message").optString("content",""):raw.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content","");
                     if(answer.trim().isEmpty())throw new IOException("El motor devolvió una respuesta vacía");
-                    result.put("ok",true).put("answer",answer);
+                    result.put("ok",true).put("answer",ResponseQuality.clean(answer));
                 }finally{c.disconnect();}
             }catch(Exception e){try{result=new JSONObject().put("ok",false).put("error",e.getMessage()==null?"Error del motor local":e.getMessage());}catch(Exception ignored){}}pretrainedReply(id,result);});
         }

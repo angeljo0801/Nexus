@@ -54,9 +54,9 @@ extern "C" JNIEXPORT jstring JNICALL Java_com_origenai_local_LocalLlama_nativeGe
  llama_memory_clear(llama_get_memory(ctx),true);
  stop.store(false);
  auto*sampler=llama_sampler_chain_init(llama_sampler_chain_default_params());
- llama_sampler_chain_add(sampler,llama_sampler_init_top_k(40));
- llama_sampler_chain_add(sampler,llama_sampler_init_top_p(0.9f,1));
- llama_sampler_chain_add(sampler,llama_sampler_init_temp(0.7f));
+ llama_sampler_chain_add(sampler,llama_sampler_init_top_k(24));
+ llama_sampler_chain_add(sampler,llama_sampler_init_top_p(0.85f,1));
+ llama_sampler_chain_add(sampler,llama_sampler_init_temp(0.45f));
  llama_sampler_chain_add(sampler,llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
  auto*batch=llama_batch_ext_init(ctx);std::string result;bool failure=false;int pos=0;
  for(int i=0;i<ntok&&!stop.load();){int n=std::min(256,ntok-i);fill(batch,tokens.data()+i,n,pos);if(llama_process(ctx,LLAMA_PROCESS_TYPE_DECODE,batch)!=0){failure=true;break;}i+=n;pos+=n;}

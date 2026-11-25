@@ -20,13 +20,13 @@ public final class LocalLlama {
     public static synchronized String load(String path){
         if(!available)throw new IllegalStateException(error);
         if(loaded&&loadedPath.equals(path))return "Modelo ya cargado";
-        String result=nativeLoad(path,2048);
+        String result=nativeLoad(path,3072);
         loaded=true;loadedPath=path;
         return result;
     }
     public static synchronized String generate(String[] roles,String[] contents){
         if(!loaded)throw new IllegalStateException("Modelo sin cargar");
-        return nativeGenerate(roles,contents,192);
+        return ResponseQuality.clean(nativeGenerate(roles,contents,320));
     }
     public static void stop(){if(available)nativeStop();}
     public static synchronized void unload(){
