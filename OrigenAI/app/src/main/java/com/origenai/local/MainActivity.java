@@ -200,6 +200,63 @@ public class MainActivity extends Activity {
                             if(bytes.length>350000)throw new IOException("Lote demasiado grande");
                             out.put("payload",new String(bytes,StandardCharsets.UTF_8));
                         }else throw new IOException("GitHub: HTTP "+r.code+" al recibir lote");
+                    }else if("pre_pull".equals(op)){
+                        Response task=http(repo,tok,"/contents/origen-pretrained-requests.json","GET",null);
+                        if(task.code==404){out.put("payload","");}
+                        else if(task.code==200){
+                            JSONObject file=new JSONObject(task.body);
+                            byte[] bytes=Base64.decode(file.getString("content"),Base64.DEFAULT);
+                            if(bytes.length>7000)throw new IOException("Solicitud de evaluación demasiado grande");
+                            out.put("payload",new String(bytes,StandardCharsets.UTF_8));
+                        }else throw new IOException("GitHub: HTTP "+task.code+" en solicitudes de evaluación");
+                        Response prev=http(repo,tok,"/contents/origen-pretrained-status.json","GET",null);
+                        if(prev.code==200){
+                            JSONObject file=new JSONObject(prev.body);
+                            byte[] bytes=Base64.decode(file.getString("content"),Base64.DEFAULT);
+                            if(bytes.length>30000)throw new IOException("Estado de evaluación demasiado grande");
+                            JSONObject previous=new JSONObject(new String(bytes,StandardCharsets.UTF_8));
+                            out.put("lastId",previous.optString("id",""));
+                        }else if(prev.code!=404)throw new IOException("GitHub: HTTP "+prev.code+" en estado de evaluación");
+                    }else if("pre_push".equals(op)){
+                        if(a==null||a.length()>25000)throw new IOException("Evaluación fuera de tamaño permitido");
+                        JSONObject status=new JSONObject(a);
+                        String id=status.optString("id","");
+                        String modelId=status.optString("model","");
+                        String state=status.optString("state","");
+                        if(status.optInt("version",-1)!=1 || !id.matches("[A-Za-z0-9._-]{1,90}") ||
+                            !("qwen08".equals(modelId)||"qwen2".equals(modelId)) ||
+                            !("completed".equals(state)||"error".equals(state)))
+                            throw new IOException("Resultado remoto inválido");
+                        Response current=http(repo,tok,"/contents/origen-pretrained-requests.json","GET",null);
+                        if(current.code!=200)throw new IOException("Solicitud remota ya no disponible");
+                        byte[] jobBytes=Base64.decode(new JSONObject(current.body).getString("content"),Base64.DEFAULT);
+                        if(jobBytes.length>7000)throw new IOException("Solicitud remota demasiado grande");
+                        JSONObject job=new JSONObject(new String(jobBytes,StandardCharsets.UTF_8));
+                        if(!id.equals(job.optString("id"))||!modelId.equals(job.optString("model")))
+                            throw new IOException("La solicitud cambió durante la evaluación");
+                        org.json.JSONArray questions=job.optJSONArray("questions");
+                        org.json.JSONArray results=status.optJSONArray("results");
+                        if(questions==null||questions.length()<1||questions.length()>5||
+                            results==null||results.length()>(questions.length()) ||
+                            ("completed".equals(state)&&results.length()!=questions.length()))
+                            throw new IOException("Resultados incompletos o incorrectos");
+                        for(int i=0;i<results.length();i++){
+                            JSONObject item=results.getJSONObject(i);
+                            String question=item.optString("q",""), answer=item.optString("a","");
+                            if(!question.equals(questions.getString(i))||answer.isEmpty()||answer.length()>4000)
+                                throw new IOException("Los resultados no coinciden con las preguntas enviadas");
+                        }
+                        if("error".equals(state)&&status.optString("error","").length()>300)
+                            throw new IOException("Error demasiado largo");
+                        Response prev=http(repo,tok,"/contents/origen-pretrained-status.json","GET",null);
+                        JSONObject body=new JSONObject()
+                            .put("message","Origen AI: resultado de evaluación local preentrenada")
+                            .put("content",Base64.encodeToString(a.getBytes(StandardCharsets.UTF_8),Base64.NO_WRAP));
+                        if(prev.code==200)body.put("sha",new JSONObject(prev.body).getString("sha"));
+                        else if(prev.code!=404)throw new IOException("GitHub: HTTP "+prev.code+" al comprobar resultado");
+                        Response pushed=http(repo,tok,"/contents/origen-pretrained-status.json","PUT",body.toString());
+                        if(pushed.code!=200&&pushed.code!=201)
+                            throw new IOException("GitHub: HTTP "+pushed.code+" al publicar resultados");
                     }else if("push".equals(op)){
                         if(a==null||a.length()>30000)throw new IOException("Estado demasiado grande");
                         new JSONObject(a);Response prev=http(repo,tok,"/contents/origen-status.json","GET",null);
