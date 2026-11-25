@@ -52,7 +52,19 @@ function remoteLocalRequest(variant,messages){
     const id=String(++serial);
     pending.set(id,r=>r.ok?resolve(r.answer):reject(Error(r.error||'Error neuronal local')));
     local.request(id,variant,JSON.stringify(messages));
-    setTimeout(()=>{if(pending.delete(id))reject(Error('La generación local superó el tiempo permitido'));},180000);
+    // Wait longer for slow CPU inference; extend once while the native engine is active.
+    const started=Date.now();
+    const watchdog=()=>{
+      if(!pending.has(id))return;
+      let generating=false;
+      try{generating=JSON.parse(local.status(variant)).generating===true;}catch(e){}
+      if(generating&&Date.now()-started<1200000){setTimeout(watchdog,30000);return;}
+      if(pending.delete(id)){
+        if(generating)try{local.stop();}catch(e){}
+        reject(Error('La generación local superó el tiempo permitido'));
+      }
+    };
+    setTimeout(watchdog,600000);
   });
 }
 window.origenRemoteInfer=async(variant,question)=>{
