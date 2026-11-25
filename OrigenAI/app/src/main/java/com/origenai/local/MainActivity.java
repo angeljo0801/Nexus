@@ -216,6 +216,7 @@ public class MainActivity extends Activity {
                             if(bytes.length>30000)throw new IOException("Estado de evaluación demasiado grande");
                             JSONObject previous=new JSONObject(new String(bytes,StandardCharsets.UTF_8));
                             out.put("lastId",previous.optString("id",""));
+                            out.put("lastState",previous.optString("state",""));
                         }else if(prev.code!=404)throw new IOException("GitHub: HTTP "+prev.code+" en estado de evaluación");
                     }else if("pre_push".equals(op)){
                         if(a==null||a.length()>25000)throw new IOException("Evaluación fuera de tamaño permitido");
