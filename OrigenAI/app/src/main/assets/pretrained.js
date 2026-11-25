@@ -24,5 +24,13 @@ $('preCheck').onclick=async()=>{capture();info('Comprobando motor…');try{const
 $('preClear').onclick=()=>{if(!window.confirm('¿Limpiar únicamente el chat de Origen AI 2.0?'))return;config.messages=[];lastPair=null;$('preIdeal').value='';save();render();info('Chat preentrenado limpio. Se conservaron los ejemplos.');};
 $('preAddExample').onclick=()=>{let a=$('preIdeal').value.trim();if(!lastPair||!a||a.length>3500){info('Primero genera una respuesta y edita su versión ideal.');return;}if(config.examples.length>=600){info('Exporta el conjunto antes de añadir más ejemplos.');return;}config.examples.push({q:lastPair.q,a});if(save()){render();info('Ejemplo guardado, todavía sin modificar los pesos neuronales.');}};
 $('preExport').onclick=()=>{if(!config.examples.length)return info('Guarda al menos un ejemplo antes de exportar.');if(!bridge)return info('Exportación disponible en Android.');const jsonl=config.examples.map(e=>JSON.stringify({messages:[{role:'user',content:e.q},{role:'assistant',content:e.a}]})).join('\n')+'\n';bridge.exportExamples(jsonl);};
+const EVAL=[
+'Una compañera de trabajo está preocupada por una reunión importante. ¿Qué le dirías?',
+'Explícame por qué una cuchara de metal se siente fría en una habitación templada.',
+'Tengo tres tareas urgentes y solo una hora. ¿Cómo decidirías por cuál empezar?',
+'¿Qué dato te faltaría antes de recomendar una compra que cuesta mucho dinero?',
+'Escribe dos oraciones distintas usando correctamente la palabra aunque.'
+];
+$('preEval').onclick=async()=>{if(busy)return;capture();busy=true;$('preEval').disabled=true;const rows=[];$('preEvalResults').textContent='Evaluando…';try{for(let i=0;i<EVAL.length;i++){info('Evaluación '+(i+1)+' de '+EVAL.length);let a;try{a=await request([{role:'system',content:'Responde en español con claridad y precisión.'},{role:'user',content:EVAL[i]}]);}catch(e){a='ERROR: '+e.message;rows.push({q:EVAL[i],a});break;}rows.push({q:EVAL[i],a});$('preEvalResults').textContent=rows.map((r,j)=>(j+1)+'. '+r.q+'\nRespuesta: '+r.a).join('\n\n');}config.lastEvaluation={model:config.model,at:new Date().toISOString(),results:rows};save();info('Evaluación terminada: '+rows.length+' de '+EVAL.length+'. Revisa pertinencia, coherencia y naturalidad.');}finally{busy=false;$('preEval').disabled=false;}};
 load();fill();if(!bridge)info('Instala la APK Android para conectar el motor local.');
 })();
