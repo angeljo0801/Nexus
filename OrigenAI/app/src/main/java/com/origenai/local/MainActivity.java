@@ -75,7 +75,8 @@ public class MainActivity extends Activity {
         @JavascriptInterface public boolean nativeActive(){return TrainingService.isActive();}
         @JavascriptInterface public String nativeProgress(){return TrainingService.status();}
         @JavascriptInterface public boolean startNative(int count,double lr,boolean remote){return TrainingService.launch(MainActivity.this,count,lr,remote);}
-        @JavascriptInterface public void pauseNative(){TrainingService.requestPause();}
+        @JavascriptInterface public void pauseNative(){prefs().edit().putBoolean("auto_enabled",false).commit();TrainingService.requestPause();}
+        @JavascriptInterface public boolean nativeSafeToResume(){return TrainingService.safeToResume(MainActivity.this);}
         @JavascriptInterface public boolean notificationEnabled(){return getSystemService(android.app.NotificationManager.class).areNotificationsEnabled();}
 
         @JavascriptInterface public void keepAwake(boolean enabled){runOnUiThread(()->{if(enabled)getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);});}

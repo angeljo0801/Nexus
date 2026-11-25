@@ -83,7 +83,7 @@ window.origenPollNative=()=>{
  nativeRunning=false;nativePending=false;
  try{reloadNativeCheckpoint();}catch(e){storageLocked=true;storageOK=false;update();throw e;}
  $('trainProgress').textContent=(p.phase||'Sesión detenida')+' · '+(p.done||0)+' / '+(p.total||0)+' pasos';$('nativeNote').textContent=p.error||'Pesos guardados. Si hay un lote pendiente, puedes reanudarlo en Conexión.';status(p.error?'Error: '+p.error:(p.phase||'Sesión guardada'));showClock(p.elapsed||0,p.speed||0,p.eta==null?NaN:p.eta);
- if((p.error||p.phase!=='Completado')&&window.origenPauseForUpgrade)window.origenPauseForUpgrade();
+ if(window.origenNativeStopped)window.origenNativeStopped({phase:p.phase||'',error:p.error||''});
  }
  }catch(e){status('Error consultando entrenamiento: '+e.message);}
 };

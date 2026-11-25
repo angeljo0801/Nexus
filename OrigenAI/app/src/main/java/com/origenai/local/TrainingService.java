@@ -26,7 +26,7 @@ public final class TrainingService extends Service {
     private volatile boolean destroyed=false,finished=false;
     private NotificationManager notifications;
     static synchronized boolean launch(Context context,int count,double lr,boolean remote){
-        if(active||count<0||(!remote&&count==0)||count>10000||!(lr==.003||lr==.001||lr==.0003))return false;
+        if(active||count<0||(!remote&&count==0)||count>10000||!(lr==.003||lr==.001||lr==.0003)||!safeToResume(context))return false;
         active=true;pause=false;generation++;
         state="{\"active\":true,\"generation\":"+generation+",\"phase\":\"Preparando modelo\",\"done\":0,\"total\":"+count+"}";
         Intent i=new Intent(context,TrainingService.class).putExtra("count",count).putExtra("lr",lr).putExtra("remote",remote);
@@ -76,6 +76,13 @@ public final class TrainingService extends Service {
             if(error!=null)o.put("error",error);state=o.toString();
         }catch(JSONException ignored){}
         if(working){String msg=phase+" · "+done+"/"+total+(speed>0?String.format(Locale.US," · %.2f pasos/s",speed):"");notifications.notify(NOTICE,notice(msg,done,total));}
+    }
+    static boolean safeToResume(Context context){
+        PowerManager pm=(PowerManager)context.getSystemService(Context.POWER_SERVICE);
+        if(Build.VERSION.SDK_INT>=29&&pm.getCurrentThermalStatus()>=PowerManager.THERMAL_STATUS_SEVERE)return false;
+        Intent b=context.registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if(b!=null){int level=b.getIntExtra(BatteryManager.EXTRA_LEVEL,-1),scale=b.getIntExtra(BatteryManager.EXTRA_SCALE,100),plug=b.getIntExtra(BatteryManager.EXTRA_PLUGGED,0);if(level>=0&&scale>0&&level*100/scale<=10&&plug==0)return false;}
+        return true;
     }
     private boolean safetyStop(long start){
         if(SystemClock.elapsedRealtime()-start>=4*60*60*1000L)return true;
@@ -135,7 +142,7 @@ public final class TrainingService extends Service {
             if(remote&&!phase.equals("Completado"))try{push(root,m,job,"paused",null,null,null);}catch(Exception e){error="No se pudo sincronizar la pausa: "+e.getMessage();}
         }catch(Throwable e){error=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();phase="Error de entrenamiento";if(loaded&&m!=null&&root!=null){try{saveModel(root,m);}catch(Exception ignored){}if(remote&&job!=null)try{push(root,m,job,"paused",null,null,error);}catch(Exception ignored){}}}
         finally{
-            if(remote&&!phase.equals("Completado"))getSharedPreferences("origen_sync",MODE_PRIVATE).edit().putBoolean("auto_enabled",false).commit();
+            if(remote&&error!=null)getSharedPreferences("origen_sync",MODE_PRIVATE).edit().putBoolean("auto_enabled",false).commit();
             publish(m,done,total,start,phase,false,error);finished=true;
             if(wake!=null&&wake.isHeld())wake.release();if(destroyed){active=false;}else{stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}
         }

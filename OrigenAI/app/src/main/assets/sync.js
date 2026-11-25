@@ -6,6 +6,7 @@ function call(op,a='',b=''){return new Promise((resolve,reject)=>{if(!bridge)ret
 window.origenNativeCompleted=completion=>{if(completion)latest=completion;preview();};
 window.origenPauseForUpgrade=()=>{pauseRequested=true;setAuto(false);if(running)running=false;if(nativeRunning&&window.OrigenStore)OrigenStore.pauseNative();status(syncBusy?'Pausando y guardando el lote…':'Modo automático desactivado para migrar.');update();};
 function info(t){$('syncInfo').textContent=t;}
+window.origenNativeStopped=p=>{if(p.error){setAuto(false);info('Entrenamiento detenido por error: '+p.error);}else if(p.phase&&p.phase!=='Completado'&&refreshAuto()){info('Sesión pausada por seguridad. La autorización sigue guardada y se reanudará cuando el teléfono lo permita.');}};
 function refreshAuto(){auto=!!(bridge&&bridge.repository()&&bridge.autoEnabled());$('syncAuto').checked=auto;return auto;}
 function setAuto(enabled){auto=!!(bridge&&bridge.repository()&&enabled);if(bridge&&!bridge.setAutoEnabled(auto)){auto=false;info('No se pudo guardar la autorización automática.');}$('syncAuto').checked=auto;return auto;}
 function controls(){for(const id of ['syncConnect','syncDisconnect','syncPull','syncPush'])$(id).disabled=syncing||running||busy||fileBusy||nativeRunning;$('syncApply').disabled=syncing||running||busy||fileBusy||nativeRunning||(!remote&&!syncJob);}
@@ -47,7 +48,7 @@ $('syncPull').onclick=pull;$('syncApply').onclick=apply;
 $('syncPush').onclick=async()=>{if(syncing||running||busy||fileBusy||nativeRunning)return;syncing=true;controls();try{if(!syncJob&&!latest)throw Error('No hay sesión nueva que informar; se conserva el último resultado remoto.');await push(syncJob?'paused':'completed',syncJob?{targetSteps:syncJob.target}:latest?{jobId:latest.id,results:latest.results,evaluation:latest.evaluation}:{});info('Estado enviado.');}catch(e){info(e.message);}finally{syncing=false;controls();}};
 $('syncAuto').onchange=()=>{if(setAuto($('syncAuto').checked)){pauseRequested=false;pull();}else if(!bridge?.repository())info('Conecta el repositorio antes de activar el modo automático.');};
 if(bridge){$('syncRepo').value=bridge.repository();info($('syncRepo').value?'Conexión guardada.':'Configura un repositorio privado.');}else info('Disponible en Android.');
-function resumeAuto(){if(refreshAuto()&&!document.hidden&&!storageLocked&&!running&&!busy&&!syncing&&!fileBusy&&!nativeRunning)pull();}
+function resumeAuto(){if(refreshAuto()&&!document.hidden&&!storageLocked&&!running&&!busy&&!syncing&&!fileBusy&&!nativeRunning&&(!window.OrigenStore||OrigenStore.nativeSafeToResume()))pull();}
 window.origenResumeSync=resumeAuto;
 setInterval(()=>{controls();resumeAuto();},60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)resumeAuto();});
