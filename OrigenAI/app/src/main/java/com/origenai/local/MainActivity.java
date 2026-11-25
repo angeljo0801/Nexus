@@ -220,10 +220,10 @@ public class MainActivity extends Activity {
                     }else if("pre_push".equals(op)){
                         if(a==null||a.length()>25000)throw new IOException("Evaluación fuera de tamaño permitido");
                         JSONObject status=new JSONObject(a);
-                        String id=status.optString("id","");
+                        String taskId=status.optString("id","");
                         String modelId=status.optString("model","");
                         String state=status.optString("state","");
-                        if(status.optInt("version",-1)!=1 || !id.matches("[A-Za-z0-9._-]{1,90}") ||
+                        if(status.optInt("version",-1)!=1 || !taskId.matches("[A-Za-z0-9._-]{1,90}") ||
                             !("qwen08".equals(modelId)||"qwen2".equals(modelId)) ||
                             !("completed".equals(state)||"error".equals(state)))
                             throw new IOException("Resultado remoto inválido");
@@ -232,7 +232,7 @@ public class MainActivity extends Activity {
                         byte[] jobBytes=Base64.decode(new JSONObject(current.body).getString("content"),Base64.DEFAULT);
                         if(jobBytes.length>7000)throw new IOException("Solicitud remota demasiado grande");
                         JSONObject job=new JSONObject(new String(jobBytes,StandardCharsets.UTF_8));
-                        if(!id.equals(job.optString("id"))||!modelId.equals(job.optString("model")))
+                        if(!taskId.equals(job.optString("id"))||!modelId.equals(job.optString("model")))
                             throw new IOException("La solicitud cambió durante la evaluación");
                         org.json.JSONArray questions=job.optJSONArray("questions");
                         org.json.JSONArray results=status.optJSONArray("results");
