@@ -66,6 +66,7 @@ final class LocalModelManager {
                     }
                 }
             }
+            if(status.optBoolean("downloading"))status.put("installed",false);
             return status;
         }catch(Exception e){try{status.put("error",e.getMessage());}catch(Exception ignored){}return status;}
     }
@@ -106,6 +107,7 @@ final class LocalModelManager {
     }
     String verifiedPath(String id)throws Exception{
         File f=file(id);
+        if(status(id).optBoolean("downloading"))throw new IOException("La descarga del GGUF todavía no ha terminado");
         if(!shape(f))throw new IOException("El GGUF no está completo; descarga el modelo desde la aplicación");
         String marker=f.length()+":"+f.lastModified();
         if(marker.equals(prefs.getString("verified_"+id,"")))return f.getAbsolutePath();
