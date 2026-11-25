@@ -116,7 +116,7 @@ public class MainActivity extends Activity {
         String host=uri.getHost();int port=uri.getPort();
         if(!"http".equals(uri.getScheme())||host==null||port<1||port>65535||uri.getRawUserInfo()!=null||uri.getRawQuery()!=null||uri.getRawFragment()!=null||(uri.getRawPath()!=null&&!uri.getRawPath().isEmpty()&&!uri.getRawPath().equals("/")))throw new IOException("Introduce una dirección HTTP local y un puerto");
         String h=host.toLowerCase(java.util.Locale.ROOT);
-        if(!h.equals("localhost")&&!h.equals("127.0.0.1")&&!h.equals("::1")&&!h.matches("(?:10\\\\.[0-9]{1,3}\\\\.[0-9]{1,3}\\\\.[0-9]{1,3}|192\\\\.168\\\\.[0-9]{1,3}\\\\.[0-9]{1,3}|172\\\\.(?:1[6-9]|2[0-9]|3[01])\\\\.[0-9]{1,3}\\\\.[0-9]{1,3})"))throw new IOException("Solo se permiten motores locales o de la red privada");
+        if(!h.equals("localhost")&&!h.equals("127.0.0.1")&&!h.equals("::1")&&!h.matches("(?:10\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3}|172\\.(?:1[6-9]|2[0-9]|3[01])\\.[0-9]{1,3}\\.[0-9]{1,3})"))throw new IOException("Solo se permiten motores locales o de la red privada");
         java.net.InetAddress a=java.net.InetAddress.getByName(host);
         if(!a.isLoopbackAddress()&&!a.isSiteLocalAddress())throw new IOException("Dirección fuera de la red privada");
         String path=transport.equals("ollama")?"/api/chat":"/v1/chat/completions";
