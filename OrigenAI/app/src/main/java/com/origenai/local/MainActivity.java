@@ -23,9 +23,7 @@ public class MainActivity extends Activity {
     private WebView web;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final ExecutorService pretrainedIo = Executors.newSingleThreadExecutor();
-    private final ExecutorService localIo = Executors.newSingleThreadExecutor();
-    private LocalModelManager localModels;
-    private volatile boolean localBusy;
+    private LocalBridge localBridge;
     private static final String KEY = "origen_sync_v1";
     private SharedPreferences prefs() { return getSharedPreferences("origen_sync", MODE_PRIVATE); }
     private javax.crypto.SecretKey key() throws Exception {
@@ -60,6 +58,8 @@ public class MainActivity extends Activity {
         });
         web.addJavascriptInterface(new SyncBridge(),"OrigenSync");
         web.addJavascriptInterface(new PretrainedBridge(),"OrigenPretrained");
+        localBridge=new LocalBridge(this);
+        web.addJavascriptInterface(localBridge,"OrigenLocal");
         web.addJavascriptInterface(new ModelStore(),"OrigenStore");
         setContentView(web); web.loadUrl("file:///android_asset/index.html");
     }
@@ -112,6 +112,8 @@ public class MainActivity extends Activity {
             }
         }catch(Exception e){modelNotice("No se pudo procesar el archivo.");}});
     }
+    void localNotice(String message){pretrainedNotice(message);}
+    void localResult(String id,JSONObject result){pretrainedReply(id,result);}
     private void pretrainedNotice(String message){runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenPretrainedNotice&&window.origenPretrainedNotice("+JSONObject.quote(message)+")",null);});}
     private void pretrainedReply(String id,JSONObject response){runOnUiThread(()->{if(web!=null)web.evaluateJavascript("window.origenPretrainedReply("+JSONObject.quote(id)+","+JSONObject.quote(response.toString())+")",null);});}
     private static URL localEndpoint(String endpoint,String transport) throws Exception {
@@ -214,5 +216,5 @@ public class MainActivity extends Activity {
         }
     }
     @Override protected void onResume(){super.onResume();if(web!=null)web.evaluateJavascript("window.origenPollNative&&window.origenPollNative();window.origenResumeSync&&window.origenResumeSync()",null);}
-    @Override protected void onDestroy(){io.shutdownNow();pretrainedIo.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenPretrained");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
+    @Override protected void onDestroy(){io.shutdownNow();pretrainedIo.shutdownNow();if(localBridge!=null)localBridge.close();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenPretrained");web.removeJavascriptInterface("OrigenLocal");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
 }
