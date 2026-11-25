@@ -1,4 +1,4 @@
-# Origen AI v0.2
+# Origen AI v0.6\n\n**Nueva organización:** Modelo experimental (red propia desde cero) y Modelo preentrenado (adaptación de redes abiertas). Instrucciones y límites actuales: [PRETRAINED_SETUP.md](PRETRAINED_SETUP.md).\n\n---\n\n## Histórico de la versión experimental\n
 
 Aplicación Android experimental, independiente de Nexus. ID: `com.origenai.local`. El motor funciona localmente; el permiso INTERNET se utiliza solo para la conexión privada opcional. El modelo Transformer causal de una capa y una cabeza de atención tiene 83.584 parámetros, ventana de 64 tokens y tokenizador BPE de 640 tokens entrenado sobre un corpus original. Los pesos se inicializan aleatoriamente en cada instalación nueva. Se incluyen 88 ejemplos de entrenamiento, no respuestas programadas ni un modelo preentrenado.
 
