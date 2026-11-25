@@ -1,6 +1,8 @@
 'use strict';
 (()=>{
 const bridge=window.OrigenSync, pending=new Map();let serial=0, remote=null, syncing=false, auto=false, latest=nativeCompletion, pauseRequested=false;
+window.origenRemoteCall=call;
+window.origenSyncRepo=()=>bridge?.repository()||'';
 window.origenSyncReply=(id,json)=>{const cb=pending.get(id);if(cb){pending.delete(id);cb(JSON.parse(json));}};
 function call(op,a='',b=''){return new Promise((resolve,reject)=>{if(!bridge)return reject(Error('Disponible solo en Android.'));const id=String(++serial);pending.set(id,r=>r.ok?resolve(r):reject(Error(r.error)));bridge.request(id,op,a,b);setTimeout(()=>{if(pending.delete(id))reject(Error('Tiempo de espera agotado.'));},65000);});}
 window.origenNativeCompleted=completion=>{if(completion)latest=completion;preview();};
