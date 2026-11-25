@@ -36,7 +36,7 @@ async function check(manual=false){
     const response=await window.origenRemoteCall('pre_pull');
     if(!response.payload){report('Sin solicitudes de evaluación nuevas.');return;}
     const job=validate(JSON.parse(response.payload));
-    if(response.lastId===job.id){report('Lote '+job.id+' respondido anteriormente.');return;}
+    if(response.lastId===job.id&&response.lastState==='completed'){report('Lote '+job.id+' respondido anteriormente.');return;}
     const status=JSON.parse(window.OrigenLocal?.status(job.model)||'{}');
     if(!status.engine){report('Motor GGUF no disponible: '+(status.engineError||'abre una APK ARM64 compatible'));return;}
     if(!status.installed){report('Solicitud '+job.id+' pendiente. Descarga primero el modelo '+job.model+'.');return;}
@@ -46,6 +46,14 @@ async function check(manual=false){
       !Array.isArray(cache.results)||cache.results.some((r,i)=>r.q!==job.questions[i])){
       cache={id:job.id,model:job.model,results:[],state:'pending'};
       if(!store({remoteLast:cache}))throw Error('No se pudo guardar el progreso de evaluación');
+    }
+    // Recover the old timeout once after upgrading; later errors require manual retry.
+    if(cache.state==='error'&&(manual||(!cache.timeoutRecoveryV1&&
+      cache.error==='La generación local superó el tiempo permitido'))){
+      cache.state='pending';delete cache.error;cache.timeoutRecoveryV1=true;
+      if(!store({remoteLast:cache}))throw Error('No se pudo guardar la reanudación');
+    }else if(cache.state==='error'&&response.lastId===job.id&&response.lastState==='error'){
+      report('Evaluación detenida. Pulsa comprobar para reintentar: '+(cache.error||''));return;
     }
     show(cache);
     if(cache.state==='pending'){
