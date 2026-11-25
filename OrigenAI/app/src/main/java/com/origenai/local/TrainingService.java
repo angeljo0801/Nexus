@@ -26,7 +26,7 @@ public final class TrainingService extends Service {
     private volatile boolean destroyed=false,finished=false;
     private NotificationManager notifications;
     static synchronized boolean launch(Context context,int count,double lr,boolean remote){
-        if(active||count<0||(!remote&&count==0)||count>10000||!(lr==.003||lr==.001||lr==.0003)||!safeToResume(context))return false;
+        if(active||LocalLlama.isLoaded()||count<0||(!remote&&count==0)||count>10000||!(lr==.003||lr==.001||lr==.0003)||!safeToResume(context))return false;
         active=true;pause=false;generation++;
         state="{\"active\":true,\"generation\":"+generation+",\"phase\":\"Preparando modelo\",\"done\":0,\"total\":"+count+"}";
         Intent i=new Intent(context,TrainingService.class).putExtra("count",count).putExtra("lr",lr).putExtra("remote",remote);
