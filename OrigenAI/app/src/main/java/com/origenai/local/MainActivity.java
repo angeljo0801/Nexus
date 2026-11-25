@@ -22,6 +22,7 @@ import org.json.JSONObject;
 public class MainActivity extends Activity {
     private WebView web;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService pretrainedIo = Executors.newSingleThreadExecutor();
     private static final String KEY = "origen_sync_v1";
     private SharedPreferences prefs() { return getSharedPreferences("origen_sync", MODE_PRIVATE); }
     private javax.crypto.SecretKey key() throws Exception {
@@ -129,7 +130,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void exportExamples(String jsonl){if(jsonl==null||jsonl.length()>1200000)return;pretrainedExport=jsonl;runOnUiThread(()->{Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.setType("application/x-ndjson");i.addCategory(Intent.CATEGORY_OPENABLE);i.putExtra(Intent.EXTRA_TITLE,"OrigenAI-LoRA.jsonl");try{startActivityForResult(i,EXPORT_PRETRAIN);}catch(Exception e){pretrainedNotice("No se pudo abrir el selector de archivos.");}});}
         @JavascriptInterface public void request(String id,String endpoint,String transport,String model,String messages){
             if(id==null||id.length()>60)return;
-            io.execute(()->{JSONObject result=new JSONObject();try{
+            pretrainedIo.execute(()->{JSONObject result=new JSONObject();try{
                 URL url=localEndpoint(endpoint,transport);
                 if(model==null||model.length()>120||model.trim().isEmpty())throw new IOException("Modelo inválido");
                 org.json.JSONArray input=new org.json.JSONArray(messages);
@@ -210,5 +211,5 @@ public class MainActivity extends Activity {
         }
     }
     @Override protected void onResume(){super.onResume();if(web!=null)web.evaluateJavascript("window.origenPollNative&&window.origenPollNative();window.origenResumeSync&&window.origenResumeSync()",null);}
-    @Override protected void onDestroy(){io.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenPretrained");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
+    @Override protected void onDestroy(){io.shutdownNow();pretrainedIo.shutdownNow();if(web!=null){web.removeJavascriptInterface("OrigenSync");web.removeJavascriptInterface("OrigenPretrained");web.removeJavascriptInterface("OrigenStore");web.destroy();web=null;}super.onDestroy();}
 }
