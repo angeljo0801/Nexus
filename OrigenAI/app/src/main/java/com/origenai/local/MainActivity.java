@@ -23,6 +23,9 @@ public class MainActivity extends Activity {
     private WebView web;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final ExecutorService pretrainedIo = Executors.newSingleThreadExecutor();
+    private final ExecutorService localIo = Executors.newSingleThreadExecutor();
+    private LocalModelManager localModels;
+    private volatile boolean localBusy;
     private static final String KEY = "origen_sync_v1";
     private SharedPreferences prefs() { return getSharedPreferences("origen_sync", MODE_PRIVATE); }
     private javax.crypto.SecretKey key() throws Exception {
