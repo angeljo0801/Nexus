@@ -31,6 +31,8 @@ jobs:
           packages: 'platforms;android-35 build-tools;35.0.0'
       - run: node --check app/src/main/assets/sync.js
       - run: node --check app/src/main/assets/pretrained.js
+      - run: node --check app/src/main/assets/pretrained_remote.js
+      - run: node tools/test_pretrained_remote.js
       - run: node tools/test_pretrained.js
       - run: python -m unittest discover -s tools -p "test_dataset_*.py"
       - run: node -e "const fs=require('fs'),vm=require('vm');const s=fs.readFileSync('app/src/main/assets/index.html','utf8');for(const m of s.matchAll(/<script>([\\s\\S]*?)<\\/script>/g))new vm.Script(m[1]);"

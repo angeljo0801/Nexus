@@ -1,6 +1,6 @@
-# Origen AI v0.7
+# Origen AI v0.8
 
-**Nueva organización:** Modelo experimental (red propia desde cero) y Modelo preentrenado (adaptación de redes abiertas). Instrucciones y límites actuales: [PRETRAINED_SETUP.md](PRETRAINED_SETUP.md).
+**Nueva organización:** Modelo experimental (red propia desde cero) y Modelo preentrenado (adaptación de redes abiertas). Instrucciones y límites actuales: [PRETRAINED_SETUP.md](PRETRAINED_SETUP.md). Nuevo canal para evaluar Qwen desde ChatGPT: [REMOTE_EVAL.md](REMOTE_EVAL.md), con autorización explícita.
 
 ---
 
