@@ -8,6 +8,9 @@ on:
       - '.github/workflows/origen-ai.yml'
 permissions:
   contents: read
+concurrency:
+  group: origen-ai-apk-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   apk:
     runs-on: ubuntu-latest

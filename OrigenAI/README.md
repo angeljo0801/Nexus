@@ -1,4 +1,4 @@
-# Origen AI v0.6
+# Origen AI v0.7
 
 **Nueva organización:** Modelo experimental (red propia desde cero) y Modelo preentrenado (adaptación de redes abiertas). Instrucciones y límites actuales: [PRETRAINED_SETUP.md](PRETRAINED_SETUP.md).
 
